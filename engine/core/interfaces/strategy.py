@@ -3,7 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from engine.core.models import AccountState, Candle, Position, Signal, Timeframe
+from engine.core.models import AccountState, Candle, NewsEvent, Position, Signal, Timeframe
 
 
 @dataclass(frozen=True)
@@ -12,6 +12,17 @@ class StrategyContext:
     candles_by_timeframe: dict[Timeframe, list[Candle]]
     account_state: AccountState
     open_positions: list[Position]
+    upcoming_news: tuple[NewsEvent, ...] = ()
+
+
+@dataclass(frozen=True)
+class StrategyEvaluation:
+    """Result of one evaluate() call. `reason` is set whether or not a signal
+    fired - PLAN.md requires logging every candidate, fired or filtered, with
+    why, which a bare `Signal | None` return can't carry."""
+
+    signal: Signal | None
+    reason: str
 
 
 class StrategyPlugin(ABC):
@@ -27,4 +38,4 @@ class StrategyPlugin(ABC):
     instruments: tuple[str, ...]
 
     @abstractmethod
-    def evaluate(self, context: StrategyContext) -> Signal | None: ...
+    def evaluate(self, context: StrategyContext) -> StrategyEvaluation: ...

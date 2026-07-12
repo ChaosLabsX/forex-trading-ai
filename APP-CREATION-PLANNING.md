@@ -139,19 +139,45 @@ a 60s interval. Schema applied (`supabase/migrations/0001_phase1_market_data.sql
 `candles`, `engine_heartbeats`, both RLS-enabled with no policies yet - deny-all
 by default until Phase 4 defines dashboard-facing policies).
 Verified with a live 90s run: connected, sent 2 heartbeats 60s apart, persisted
-300 H1 + 150 H4 + 90 D1 candles for all 4 instruments, confirmed via direct
-Supabase query.
+300 H1 + 250 H4 + 90 D1 candles for all 4 instruments, confirmed via direct
+Supabase query. (H4 window later corrected from an initial 150 to 250 - see
+Phase 2 notes; 150 was too small for the strategy's own EMA(200) requirement.)
 *Remaining for full exit: leave it running unattended for 24h+ and confirm it
 survives a manual restart without issue - runs as a plain foreground script for
 now (Ctrl+C to stop); no service wrapping until Phase 6.*
 
-**Phase 2 — Reference strategy plugin (rules only, no execution)**
-Implement the EMA trend-following v1 `StrategyPlugin` (regime filter, entry
-trigger, ATR stop/target calc) and a first `NewsProvider` implementation for the
-blackout filter. Log every candidate signal — fired or filtered, with why — to
-Supabase. Backtest against historical data before moving on.
-*Exit: engine correctly logs signals against live demo data for several days via
-the plugin-selected strategy; backtest results are sane.*
+**Phase 2 — Reference strategy plugin (rules only, no execution)** ✅ built, backtested, verified live
+`EMATrendStrategy` implemented (H4 EMA50/200 regime + ADX(14) gate, H1 EMA20/50
+crossover entry, ATR(14) stop/target, London/NY session filter, news blackout
+check) plus `NullNewsProvider` (always-empty placeholder - a real economic
+calendar needs an API key from a provider of your choice, e.g. TradingEconomics/
+Finnhub/FMP; that account signup is a manual action, deferred rather than
+blocking Phase 2). `signals` table added
+(`supabase/migrations/0002_phase2_signals.sql`) and wired into the loop, which
+now evaluates every configured strategy against fresh candles each refresh cycle
+and logs every evaluation - fired or filtered, with why - deduplicated per
+closed bar.
+
+Two real bugs found and fixed during this phase, not just written and assumed
+correct: (1) `StrategyPlugin.evaluate()` originally returned bare `Signal | None`,
+which can't carry a filter reason - extended to return a `StrategyEvaluation
+(signal, reason)` wrapper, since PLAN.md's own requirement to log *why* a signal
+was filtered couldn't be satisfied by the original interface. (2) the engine was
+passing MT5's still-forming current bar straight into indicator calculations,
+which would make a crossover reading flip-flop as price moved within the hour -
+fixed by trimming to closed-only bars before every strategy evaluation.
+
+Backtested against ~4000 H1 bars (~5.5 months) of real historical data per
+instrument, replaying the exact same logic and window sizes the live loop uses:
+16 signals total across 4 instruments, R-multiples landing exactly on the
+designed 1.5/2.0 ATR ratio (-1.00R losses, +1.33R wins) - confirms the logic is
+internally consistent, though the sample is far too small for the win rates
+themselves to mean anything yet. Live-verified: ran the full loop against the
+real demo account, confirmed exactly one signal-evaluation row per instrument
+landed in Supabase, and confirmed re-running within the same closed bar does
+not produce duplicate rows.
+*Exit met for the core loop; only a live multi-day observation period (naturally
+overlapping the Phase 1 24h+ soak test) remains before calling Phase 2 fully done.*
 
 **Phase 3 — Risk engine + execution engine (demo)**
 Implement the default `RiskEngine` plugin (`TEST_MODE`-driven sizing, circuit
@@ -192,7 +218,9 @@ One doc per subsystem plus an architecture overview, added as each phase lands
 `/docs/dashboard.md`, `/docs/strategy-ema-trend-v1.md`, `/docs/safety-rails.md`).
 
 ---
-*Status: Phase 0 complete. Phase 1's engine loop is built and verified live
-(MT5 connectivity, Telegram alerts, Supabase persistence all confirmed working).
-Leave `scripts/run_engine.py` running for a 24h+ soak test to fully close out
-Phase 1, then move to Phase 2 (reference strategy plugin).*
+*Status: Phases 0-2 built and verified live end-to-end (MT5 connectivity,
+Telegram alerts, Supabase persistence, strategy evaluation and signal logging,
+and a sanity-check backtest all confirmed working against the real demo
+account). Formal exit on Phases 1-2 just needs a 24h+ unattended soak test,
+which can run in parallel with Phase 3 development. Moving on to Phase 3 (risk
+engine + execution engine on the demo account).*

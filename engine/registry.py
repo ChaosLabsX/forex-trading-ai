@@ -23,7 +23,10 @@ PLUGIN_REGISTRY: dict[str, dict[str, str]] = {
     "execution_engine": {
         "default": "engine.plugins.execution.default_execution_engine:DefaultExecutionEngine",
     },
-    "news_provider": {},
+    "news_provider": {
+        # named "placeholder", not "null", to avoid clashing with YAML's null keyword
+        "placeholder": "engine.plugins.news.null_news_provider:NullNewsProvider",
+    },
     "notification": {
         "console": "engine.plugins.notifications.console_notifier:ConsoleNotifier",
         "telegram": "engine.plugins.notifications.telegram_notifier:TelegramNotifier",

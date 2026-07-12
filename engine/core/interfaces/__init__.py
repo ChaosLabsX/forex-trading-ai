@@ -5,7 +5,7 @@ from engine.core.interfaces.market_data import MarketDataProvider
 from engine.core.interfaces.news import NewsProvider
 from engine.core.interfaces.notification import NotificationProvider
 from engine.core.interfaces.risk import RiskEngine
-from engine.core.interfaces.strategy import StrategyContext, StrategyPlugin
+from engine.core.interfaces.strategy import StrategyContext, StrategyEvaluation, StrategyPlugin
 
 __all__ = [
     "AIProvider",
@@ -16,5 +16,6 @@ __all__ = [
     "NotificationProvider",
     "RiskEngine",
     "StrategyContext",
+    "StrategyEvaluation",
     "StrategyPlugin",
 ]
