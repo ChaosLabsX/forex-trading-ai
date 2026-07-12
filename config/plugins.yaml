@@ -1,0 +1,14 @@
+# Which concrete plugin backs each subsystem. Not a secret - safe to commit.
+# Entries left null/empty aren't implemented yet; see PLAN.md for phase order.
+# Moves to the dashboard Settings UI once it exists (Phase 4).
+
+broker: mt5             # implemented; connect() needs the MT5 terminal installed + logged in
+market_data: mt5        # implemented; same requirement
+strategies: []          # ["ema_trend_v1"] - Phase 2
+risk_engine: null       # "default" - Phase 3
+execution_engine: null  # "default" - Phase 3
+news_provider: null     # Phase 2
+notifications:
+  - console              # always safe - no external dependency
+  - telegram              # verified working 2026-07-12
+ai_provider: null       # "claude" - Phase 5

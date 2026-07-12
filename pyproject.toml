@@ -1,0 +1,21 @@
+[project]
+name = "mt5-engine"
+version = "0.1.0"
+description = "Strategy-agnostic MT5 + IC Markets automated trading engine"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.7",
+    "pydantic-settings>=2.3",
+    "PyYAML>=6.0",
+    # Windows-only; requires a locally installed, logged-in MT5 terminal at
+    # runtime. The whole engine is Windows-only anyway (see PLAN.md), so this
+    # isn't kept as an optional extra.
+    "MetaTrader5>=5.0.45",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["engine*"]
