@@ -13,3 +13,6 @@ dashboard/dist/
 .vscode/
 .idea/
 *.log
+
+# Design source files (large binaries) - not needed to build/run the app
+Illustrator/

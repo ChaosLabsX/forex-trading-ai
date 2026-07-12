@@ -72,6 +72,23 @@ needs its own grants/RLS policies on every table the dashboard reads, even the
   a branch" - if you ever see the live site showing a generic Jekyll-rendered
   README instead of the dashboard, check that setting first.
 
+## PWA
+
+Installable as "Forex AI" via `vite-plugin-pwa` (`generateSW` strategy,
+`registerType: 'autoUpdate'`). Manifest/icons are configured directly in
+`vite.config.ts`, not a static `manifest.webmanifest` in `public/` - the
+plugin generates a base-path-correct one at build time. Icons live in
+`dashboard/public/` (`favicon.ico`, `favicon-96x96.png`, `apple-touch-icon.png`,
+`pwa-192x192.png`, `pwa-512x512.png`).
+
+**The service worker precaches only the app shell** (JS/CSS/HTML/icons) - no
+`runtimeCaching` rule is defined for the Supabase origin, so API calls are
+never intercepted or cached by the service worker; they always hit the
+network. This is deliberate: caching trading data would mean showing stale
+signals/trades/P&L as if current, which is actively misleading for a
+financial monitoring tool. If offline, the app shell still loads but shows
+no/stale-in-memory data rather than a false "this is current" view.
+
 ## Adding a new view
 
 Add a component under `src/components/`, query Supabase with the existing
