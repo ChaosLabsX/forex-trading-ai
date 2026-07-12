@@ -4,6 +4,7 @@ import { TradeHistory } from "./components/TradeHistory";
 import { SignalsFeed } from "./components/SignalsFeed";
 import { Login } from "./components/Login";
 import { Controls } from "./components/Controls";
+import { SetPassword } from "./components/SetPassword";
 import { useAuth } from "./lib/useAuth";
 
 function App() {
@@ -17,7 +18,14 @@ function App() {
 
       <EngineHealth />
 
-      {!loading && (session ? <Controls session={session} /> : <Login />)}
+      {!loading && (session ? (
+        <>
+          <Controls session={session} />
+          <SetPassword />
+        </>
+      ) : (
+        <Login />
+      ))}
 
       <OpenTrades />
       <TradeHistory />
