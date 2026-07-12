@@ -3,6 +3,12 @@
 Independent project. No shared code, credentials, repo, Supabase project, or Telegram
 bot with the OKX app. That project is read-only reference material.
 
+> **New to this repo? Read [`CLAUDE.md`](CLAUDE.md) first** — it's the short
+> orientation doc (what's built, how it fits together, conventions, how to run
+> it) with links to everything below. This file is the detailed phase-by-phase
+> log and roadmap; the **Status** line at the very bottom is the current
+> single source of truth for what's done vs. pending.
+
 ## Hard constraint
 
 MT5 has no public REST API. The official `MetaTrader5` Python package requires a

@@ -6,16 +6,22 @@ every major subsystem. Core code only ever depends on the abstract interfaces in
 
 ## Interfaces
 
-| Interface | File | Contract |
-|---|---|---|
-| `BrokerAdapter` | `broker.py` | connect/auth, account state, place/modify/close orders |
-| `MarketDataProvider` | `market_data.py` | ticks/candles for a symbol+timeframe |
-| `StrategyPlugin` | `strategy.py` | `evaluate(context) -> Signal \| None` |
-| `RiskEngine` | `risk.py` | `validate_signal(...) -> RiskDecision` |
-| `ExecutionEngine` | `execution.py` | turn an approved order into broker actions; manage open positions |
-| `NewsProvider` | `news.py` | upcoming high-impact events for a news-blackout filter |
-| `NotificationProvider` | `notification.py` | deliver a lifecycle/alert event |
-| `AIProvider` | `ai_provider.py` | optional pre-execution review of a signal |
+| Interface | File | Contract | Active plugin |
+|---|---|---|---|
+| `BrokerAdapter` | `broker.py` | connect/auth, account state, place/modify/close orders, `get_closed_position_pnl(id)` | `mt5` |
+| `MarketDataProvider` | `market_data.py` | ticks/candles for a symbol+timeframe | `mt5` |
+| `StrategyPlugin` | `strategy.py` | `evaluate(context) -> StrategyEvaluation(signal, reason)` | `ema_trend_v1` |
+| `RiskEngine` | `risk.py` | `validate_signal(...) -> RiskDecision` | `default` |
+| `ExecutionEngine` | `execution.py` | `execute(order, broker) -> Position`; `manage_open_position(position, tick, broker)` | `default` |
+| `NewsProvider` | `news.py` | upcoming high-impact events for a news-blackout filter | `placeholder` (always empty - real calendar needs an API key) |
+| `NotificationProvider` | `notification.py` | deliver a lifecycle/alert event | `console` + `telegram` |
+| `AIProvider` | `ai_provider.py` | `review_signal(signal, context) -> AIVerdict`, shadow mode only | `claude` |
+
+`ExecutionEngine` and `BrokerAdapter` take the broker/relevant collaborator as
+an explicit method argument rather than holding a reference - every plugin
+constructor still takes just `settings: Settings`, so dependencies between
+subsystems are passed at the call site (in `engine/loop.py`), not wired at
+construction time.
 
 ## How wiring works
 
@@ -53,7 +59,12 @@ into something like a marketplace of externally authored strategies.
 
 ## Reference implementation status
 
-See [`PLAN.md`](../APP-CREATION-PLANNING.md) for which plugin is implemented in
-which phase. As of Phase 0, only `ConsoleNotifier` is a real implementation - it
-exists solely to prove this wiring end-to-end (`scripts/smoke_test_registry.py`)
-without requiring any external account.
+All 8 interfaces have at least one real, live-verified implementation (see the
+table above and `config/plugins.yaml`) - `scripts/smoke_test_registry.py`
+confirms zero unimplemented slots. `ema_trend_v1` (EMA/ADX trend-following) and
+`claude` (shadow-mode review) are explicitly *reference* implementations - the
+whole point of this architecture is that they're swappable for a different
+strategy or AI provider without touching the engine, risk logic, execution
+logic, dashboard, or database. See [`docs/engine.md`](engine.md) for what each
+active plugin actually does, and [`APP-CREATION-PLANNING.md`](../APP-CREATION-PLANNING.md)
+for which phase built which plugin and why.
