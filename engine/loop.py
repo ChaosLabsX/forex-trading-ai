@@ -66,6 +66,7 @@ class EngineLoop:
         # (strategy_name, symbol) -> timestamp of the last *closed* entry-timeframe
         # bar we evaluated, so we log each closed bar's outcome exactly once
         self._last_evaluated_bar: dict[tuple[str, str], datetime] = {}
+        self._paused = False
 
     def run_forever(self) -> None:
         _notify_all(self._engine, "startup", "Engine loop starting.")
@@ -85,6 +86,8 @@ class EngineLoop:
 
     def _tick(self) -> None:
         self._ensure_connected()
+        if self._connected:
+            self._process_commands()
         now = time.monotonic()
         if self._connected and now - self._last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
             self._send_heartbeat()
@@ -182,6 +185,57 @@ class EngineLoop:
                     symbol, candles_by_timeframe, account_state, open_positions, upcoming_news
                 )
 
+    def _process_commands(self) -> None:
+        try:
+            pending = self._supabase.select("commands", {"status": "eq.pending", "order": "created_at.asc"})
+        except Exception:
+            logger.exception("failed to fetch pending commands")
+            return
+
+        for row in pending:
+            command_id = row["id"]
+            command_type = row["command_type"]
+            try:
+                if command_type == "pause":
+                    self._paused = True
+                    logger.info("PAUSED via dashboard command")
+                    _notify_all(self._engine, "paused", "Trading paused via dashboard command.")
+                elif command_type == "resume":
+                    self._paused = False
+                    logger.info("RESUMED via dashboard command")
+                    _notify_all(self._engine, "resumed", "Trading resumed via dashboard command.")
+                elif command_type == "emergency_close_all":
+                    self._emergency_close_all()
+                else:
+                    logger.warning("unknown command type: %s", command_type)
+            except Exception:
+                logger.exception("failed to process command %s (%s)", command_id, command_type)
+                continue
+
+            try:
+                self._supabase.update(
+                    "commands",
+                    {"id": f"eq.{command_id}"},
+                    {"status": "processed", "processed_at": datetime.now(timezone.utc).isoformat()},
+                )
+            except Exception:
+                logger.exception("failed to mark command %s processed", command_id)
+
+    def _emergency_close_all(self) -> None:
+        broker = self._engine.broker
+        if broker is None:
+            return
+        positions = broker.get_open_positions()
+        logger.warning("EMERGENCY CLOSE ALL: closing %d open position(s)", len(positions))
+        _notify_all(
+            self._engine, "emergency_close", f"Emergency close-all triggered: closing {len(positions)} position(s)."
+        )
+        for position in positions:
+            try:
+                broker.close_position(position.id)
+            except Exception:
+                logger.exception("failed to close position %s during emergency close-all", position.id)
+
     def _evaluate_strategies(
         self,
         symbol: str,
@@ -190,6 +244,8 @@ class EngineLoop:
         open_positions: list,
         upcoming_news: tuple,
     ) -> None:
+        if self._paused:
+            return
         for strategy in self._engine.strategies:
             if symbol not in strategy.instruments:
                 continue

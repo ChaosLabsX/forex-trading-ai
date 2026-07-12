@@ -213,13 +213,44 @@ pending the forex market reopening.
 sustained demo run to prove circuit breakers and the lifecycle hold up over
 time.*
 
-**Phase 4 — Dashboard**
-React + TypeScript SPA (signals, open trades, history/performance, engine health,
-manual pause/resume/emergency-close), Settings UI for keys/config — including
-which plugin is active per subsystem — deployed to GitHub Pages via GitHub Actions.
-Includes the `commands` table (deferred from Phase 3) and the engine-side
-Supabase Realtime subscription that consumes it.
-*Exit: full monitoring and control from the browser, no direct VPS access needed.*
+**Phase 4 — Dashboard** — built and verified live (except real-credential login)
+React + TypeScript SPA (Vite) with public read-only monitoring (engine health/
+heartbeat, open trades, trade history + win-rate/P&L stats, recent signals)
+using the Supabase anon key - RLS policies (migration
+`0005_phase4_dashboard_rls.sql`) are the real access boundary. Manual controls
+(pause/resume/emergency-close-all) require Supabase Auth sign-in and write to
+the `commands` table via RLS restricted to `authenticated`, checked against
+`auth.uid()`.
+
+**Architecture change made while building this (not a new direction, a
+correction):** the original plan called for the engine to consume `commands`
+via a Supabase Realtime (websocket) subscription. Since `engine/loop.py`
+already polls every 2 seconds for connection health, checking `commands` on
+that same tick gets pause/emergency-stop reacting within ~2 seconds - plenty
+fast for this system - without a websocket client dependency. Switched to
+polling; verified live (see below).
+
+Public sign-ups are disabled on the Supabase Auth project - only one invited
+user exists. The user was invited by email (Supabase's invite flow), never a
+password Claude set or saw.
+
+**Deferred, not built:** a Settings UI for editing plugin selection/API keys
+from the browser. Doing this safely would need real user-management (not just
+a single shared login) and a secure way to edit `.env`-equivalent secrets from
+a static site talking only to the anon key - a meaningfully bigger scope than
+"add a form." Config changes still go through `config/plugins.yaml` + `.env`
+directly for now.
+
+Live-verified: dashboard correctly renders real Supabase data (heartbeat,
+empty trades tables, real signal history) with no auth; sign-in correctly
+round-trips to Supabase Auth and displays real errors (tested with a
+deliberately wrong password - correct login is pending the user setting their
+password via the invite email, since Claude never handles that password
+directly). Pause/resume commands verified end-to-end earlier in Phase 3/4
+crossover work (inserted manually, consumed by the engine within one tick,
+marked processed, Telegram-notified).
+*Exit: full monitoring works now; full control-loop verification needs the
+user to complete sign-in themselves once, then confirm the buttons work.*
 
 **Phase 5 — AI decision layer**
 Implement the first `AIProvider` plugin (Claude) as an optional pre-execution
@@ -250,5 +281,10 @@ One doc per subsystem plus an architecture overview, added as each phase lands
 engine approval path verified live; final execution/close/reconciliation
 verification is blocked on the weekend forex market being closed (confirmed via
 a correctly-rejected order, not a bug) and will resume once markets reopen.
-Formal exit on Phases 1-3 needs: a 24h+ unattended soak test, and the pending
-live fill/close check. Moving on to Phase 4 (dashboard) in the meantime.*
+Phase 4 dashboard built and verified live (monitoring views + auth error
+handling + command consumption); needs the user to set their password via the
+Supabase invite email and enable "GitHub Actions" as the Pages build source
+(Settings → Pages) before the live URL goes up. Remaining before calling
+Phases 1-4 fully closed: a 24h+ unattended engine soak test, the pending live
+fill/close check once markets reopen, and the user completing sign-in once to
+confirm the control buttons work end-to-end.*

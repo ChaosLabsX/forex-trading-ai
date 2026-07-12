@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dashboard-dev",
+      "runtimeExecutable": "dashboard\\run-dev.cmd",
+      "runtimeArgs": [],
+      "port": 5173
+    }
+  ]
+}
