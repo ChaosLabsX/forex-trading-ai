@@ -1,3 +1,9 @@
+export type AIReview = {
+  approved: boolean;
+  confidence: number;
+  rationale: string;
+};
+
 export type Signal = {
   id: number;
   strategy_name: string;
@@ -12,6 +18,7 @@ export type Signal = {
   risk_approved: boolean | null;
   risk_reason: string | null;
   created_at: string;
+  ai_reviews: AIReview[];
 };
 
 export type Trade = {

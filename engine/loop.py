@@ -288,7 +288,42 @@ class EngineLoop:
             else:
                 logger.info("no signal: %s %s - %s", strategy.name, symbol, evaluation.reason)
 
-            self._log_signal(strategy.name, symbol, evaluation, risk_approved, risk_reason)
+            signal_id = self._log_signal(strategy.name, symbol, evaluation, risk_approved, risk_reason)
+
+            if evaluation.signal is not None and signal_id is not None:
+                self._review_with_ai(signal_id, evaluation.signal, context)
+
+    def _review_with_ai(self, signal_id: int, signal, context: StrategyContext) -> None:
+        """Shadow mode: logs Claude's opinion for later comparison, never
+        gates execution - RiskEngine's decision already ran before this."""
+        ai_provider = self._engine.ai_provider
+        if ai_provider is None:
+            return
+
+        try:
+            verdict = ai_provider.review_signal(signal, context)
+        except Exception:
+            logger.exception("AI review failed for signal %s", signal_id)
+            return
+
+        logger.info(
+            "AI review: signal=%s approved=%s confidence=%.2f", signal_id, verdict.approved, verdict.confidence
+        )
+        try:
+            self._supabase.insert(
+                "ai_reviews",
+                [
+                    {
+                        "signal_id": signal_id,
+                        "model": "claude-sonnet-5",
+                        "approved": verdict.approved,
+                        "confidence": verdict.confidence,
+                        "rationale": verdict.rationale,
+                    }
+                ],
+            )
+        except Exception:
+            logger.exception("failed to persist AI review for signal %s", signal_id)
 
     def _route_through_risk_engine(self, strategy_name: str, signal, account_state, open_positions) -> tuple:
         risk_engine = self._engine.risk_engine
@@ -404,7 +439,9 @@ class EngineLoop:
                 f"{row['strategy_name']} {row['symbol']} closed, P&L: {pnl_text}",
             )
 
-    def _log_signal(self, strategy_name: str, symbol: str, evaluation, risk_approved=None, risk_reason=None) -> None:
+    def _log_signal(
+        self, strategy_name: str, symbol: str, evaluation, risk_approved=None, risk_reason=None
+    ) -> int | None:
         signal = evaluation.signal
         row = {
             "strategy_name": strategy_name,
@@ -421,6 +458,8 @@ class EngineLoop:
             "risk_reason": risk_reason,
         }
         try:
-            self._supabase.insert("signals", [row])
+            inserted = self._supabase.insert("signals", [row], returning=True)
+            return inserted[0]["id"] if inserted else None
         except Exception:
             logger.exception("failed to log signal for %s %s", strategy_name, symbol)
+            return None

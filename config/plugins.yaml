@@ -13,4 +13,4 @@ news_provider: placeholder  # always-empty stand-in; real calendar source needs
 notifications:
   - console              # always safe - no external dependency
   - telegram              # verified working 2026-07-12
-ai_provider: null       # "claude" - Phase 5
+ai_provider: claude     # shadow mode only - see engine/loop.py, does not gate execution yet

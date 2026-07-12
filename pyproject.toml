@@ -11,6 +11,7 @@ dependencies = [
     # runtime. The whole engine is Windows-only anyway (see PLAN.md), so this
     # isn't kept as an optional extra.
     "MetaTrader5>=5.0.45",
+    "anthropic>=0.40",
 ]
 
 [build-system]

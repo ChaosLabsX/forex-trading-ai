@@ -252,12 +252,35 @@ marked processed, Telegram-notified).
 *Exit: full monitoring works now; full control-loop verification needs the
 user to complete sign-in themselves once, then confirm the buttons work.*
 
-**Phase 5 — AI decision layer**
-Implement the first `AIProvider` plugin (Claude) as an optional pre-execution
-reviewer: rules-based signal fires → Claude gets technical + risk context →
-confidence/go-no-go + rationale, logged alongside the signal. Shadow mode first
-(logs only), promoted to gating once validated.
-*Exit: documented comparison of rules-only vs. AI-reviewed outcomes.*
+**Phase 5 — AI decision layer** — built and verified live
+`ClaudeAIProvider` implemented (`claude-sonnet-5`, structured tool-use output
+for a reliable `approved`/`confidence`/`rationale` verdict). Runs in shadow
+mode: every fired signal gets reviewed after the risk engine's own decision,
+logged to a new `ai_reviews` table (migration `0006_phase5_ai_reviews.sql`,
+foreign-keyed to `signals`) - the verdict never gates execution yet, exactly
+as planned. Dashboard's signal feed now joins and displays the AI verdict
+alongside each signal.
+
+Verified live with two hand-built test cases before wiring into the loop: a
+clean trend-following setup with good R:R and a clean account (approved,
+72% confidence, cited the specific EMA/ADX/R:R reasoning) and a deliberately
+bad one - poor R:R, weak ADX, account already under daily-loss pressure
+(correctly rejected, 90% confidence, cited the specific numbers). A third
+test using a placeholder "verification test signal" reason string was also
+correctly rejected, with Claude explicitly noting there was no real market
+rationale to evaluate - a good sign it's reading the actual content rather
+than pattern-matching on the numeric fields alone. Full pipeline (signal
+insert → id capture → AI review → linked row → dashboard join) verified
+end-to-end against the real Supabase project and a real API call.
+
+`SupabaseClient.insert()` gained an optional `returning` flag (via PostgREST's
+`Prefer: return=representation`), needed so a logged signal's id could be
+captured and passed to its linked AI review - a small, necessary completion,
+not a new direction.
+*Exit: shadow-mode comparison data is now being generated on every fired
+signal. A documented rules-only vs. AI-reviewed comparison needs a real
+sample of live signals to accumulate first - revisit once Phase 3's live
+trading has run for a while.*
 
 **Phase 6 — VPS deployment + live-readiness checklist**
 Provision the Windows VPS ([`infra/vps-setup.md`](infra/vps-setup.md)), move the
@@ -287,4 +310,8 @@ Supabase invite email and enable "GitHub Actions" as the Pages build source
 (Settings → Pages) before the live URL goes up. Remaining before calling
 Phases 1-4 fully closed: a 24h+ unattended engine soak test, the pending live
 fill/close check once markets reopen, and the user completing sign-in once to
-confirm the control buttons work end-to-end.*
+confirm the control buttons work end-to-end. Phase 5 (AI shadow-mode review)
+built and verified live, generating comparison data on every fired signal
+going forward. Only Phase 6 (VPS deployment + live-readiness checklist)
+remains, intentionally not started - VPS provisioning is a purchase decision
+for the user to make and initiate.*

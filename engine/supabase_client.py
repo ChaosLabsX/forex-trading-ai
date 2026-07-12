@@ -22,8 +22,9 @@ class SupabaseClient:
         self._base = settings.supabase_url.rstrip("/") + "/rest/v1"
         self._key = settings.supabase_service_role_key
 
-    def insert(self, table: str, rows: list[dict]) -> None:
-        self._request("POST", f"/{table}", rows)
+    def insert(self, table: str, rows: list[dict], returning: bool = False) -> list[dict] | None:
+        extra_headers = {"Prefer": "return=representation"} if returning else None
+        return self._request("POST", f"/{table}", rows, extra_headers=extra_headers)
 
     def upsert(self, table: str, rows: list[dict], on_conflict: str) -> None:
         query = urllib.parse.urlencode({"on_conflict": on_conflict})

@@ -12,7 +12,7 @@ export function SignalsFeed() {
     async function load() {
       const { data } = await supabase
         .from("signals")
-        .select("*")
+        .select("*, ai_reviews(approved, confidence, rationale)")
         .order("created_at", { ascending: false })
         .limit(30);
       if (!cancelled) {
@@ -44,22 +44,29 @@ export function SignalsFeed() {
               <th>Symbol</th>
               <th>Strategy</th>
               <th>Fired</th>
+              <th>AI review</th>
               <th>Reason</th>
             </tr>
           </thead>
           <tbody>
-            {signals.map((s) => (
-              <tr key={s.id}>
-                <td>{new Date(s.created_at).toLocaleString()}</td>
-                <td>{s.symbol}</td>
-                <td>{s.strategy_name}</td>
-                <td className={s.fired ? "long" : "muted"}>
-                  {s.fired ? s.direction : "no"}
-                  {s.fired && s.risk_approved === false ? " (rejected)" : ""}
-                </td>
-                <td className="reason">{s.reason}</td>
-              </tr>
-            ))}
+            {signals.map((s) => {
+              const review = s.ai_reviews?.[0];
+              return (
+                <tr key={s.id}>
+                  <td>{new Date(s.created_at).toLocaleString()}</td>
+                  <td>{s.symbol}</td>
+                  <td>{s.strategy_name}</td>
+                  <td className={s.fired ? "long" : "muted"}>
+                    {s.fired ? s.direction : "no"}
+                    {s.fired && s.risk_approved === false ? " (rejected)" : ""}
+                  </td>
+                  <td className={review ? (review.approved ? "long" : "short") : "muted"}>
+                    {review ? `${review.approved ? "agree" : "disagree"} (${Math.round(review.confidence * 100)}%)` : "-"}
+                  </td>
+                  <td className="reason">{review ? `${s.reason} — Claude: ${review.rationale}` : s.reason}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       )}
