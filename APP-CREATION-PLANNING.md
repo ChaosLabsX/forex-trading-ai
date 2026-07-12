@@ -179,18 +179,46 @@ not produce duplicate rows.
 *Exit met for the core loop; only a live multi-day observation period (naturally
 overlapping the Phase 1 24h+ soak test) remains before calling Phase 2 fully done.*
 
-**Phase 3 — Risk engine + execution engine (demo)**
-Implement the default `RiskEngine` plugin (`TEST_MODE`-driven sizing, circuit
-breakers) and `ExecutionEngine` plugin (order placement/modify/close through the
-`BrokerAdapter` interface), the phased trade-lifecycle state machine in Supabase,
-and the Realtime-driven `commands` table for dashboard control.
-*Exit: engine autonomously runs a full trade lifecycle correctly over a sustained
-demo test period (1–2 weeks), with working circuit breakers.*
+**Phase 3 — Risk engine + execution engine (demo)** — built, partially verified live
+`DefaultRiskEngine` (`TEST_MODE` fixed-lot sizing, max-concurrent-trades cap,
+consecutive-losing-trades circuit breaker, max-daily-loss % circuit breaker -
+both breakers driven off real numbers computed from MT5's own closed-deal
+history, not placeholders) and `DefaultExecutionEngine` (order placement through
+`BrokerAdapter`) implemented. Trade lifecycle (`trades` table, migration
+`0003_phase3_trades.sql`) wired into `engine/loop.py`: an approved signal opens
+a real order and a Supabase row, and every cycle reconciles Supabase's "OPEN"
+rows against MT5's actual open positions to detect closures, fetch the real
+realized P&L via MT5's deal history, and fire a Telegram alert - both on open
+and on close.
+
+`ExecutionEngine`'s interface picked up a `broker` parameter on `execute()`/
+`manage_open_position()` (plugins otherwise only take `Settings`, so the broker
+has to be passed in rather than held) - a necessary completion of the Phase 0
+interface, not a new direction. Same reasoning for `BrokerAdapter` gaining
+`get_closed_position_pnl()`, needed to look up what a closed trade actually
+made/lost.
+
+The dashboard's `commands` table (originally scoped to this phase) is deferred
+to Phase 4 - it only does anything once a dashboard exists to write to it.
+
+Live verification in progress: manually drove a hand-built signal through
+`DefaultRiskEngine` (approved correctly against a clean account) into
+`DefaultExecutionEngine.execute()` against the real demo account. First attempt
+failed with MT5 retcode 10027 (AutoTrading disabled in the terminal - user
+enabled it). Second attempt failed with retcode 10018 (market closed - it was a
+weekend), which is MT5 correctly refusing the order rather than a bug. Full
+live verification (fill → close → real P&L reconciliation → Telegram) is
+pending the forex market reopening.
+*Exit: still needs the live fill/close/reconciliation check above, then a
+sustained demo run to prove circuit breakers and the lifecycle hold up over
+time.*
 
 **Phase 4 — Dashboard**
 React + TypeScript SPA (signals, open trades, history/performance, engine health,
 manual pause/resume/emergency-close), Settings UI for keys/config — including
 which plugin is active per subsystem — deployed to GitHub Pages via GitHub Actions.
+Includes the `commands` table (deferred from Phase 3) and the engine-side
+Supabase Realtime subscription that consumes it.
 *Exit: full monitoring and control from the browser, no direct VPS access needed.*
 
 **Phase 5 — AI decision layer**
@@ -218,9 +246,9 @@ One doc per subsystem plus an architecture overview, added as each phase lands
 `/docs/dashboard.md`, `/docs/strategy-ema-trend-v1.md`, `/docs/safety-rails.md`).
 
 ---
-*Status: Phases 0-2 built and verified live end-to-end (MT5 connectivity,
-Telegram alerts, Supabase persistence, strategy evaluation and signal logging,
-and a sanity-check backtest all confirmed working against the real demo
-account). Formal exit on Phases 1-2 just needs a 24h+ unattended soak test,
-which can run in parallel with Phase 3 development. Moving on to Phase 3 (risk
-engine + execution engine on the demo account).*
+*Status: Phases 0-2 built and verified live end-to-end. Phase 3 built, risk
+engine approval path verified live; final execution/close/reconciliation
+verification is blocked on the weekend forex market being closed (confirmed via
+a correctly-rejected order, not a bug) and will resume once markets reopen.
+Formal exit on Phases 1-3 needs: a 24h+ unattended soak test, and the pending
+live fill/close check. Moving on to Phase 4 (dashboard) in the meantime.*

@@ -43,3 +43,9 @@ class BrokerAdapter(ABC):
 
     @abstractmethod
     def close_position(self, position_id: str, volume: float | None = None) -> Position: ...
+
+    @abstractmethod
+    def get_closed_position_pnl(self, position_id: str) -> float | None:
+        """Realized P&L for a position that has already closed (however it
+        closed - stop, target, or manual), or None if no record is found."""
+        ...

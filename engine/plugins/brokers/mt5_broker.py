@@ -51,14 +51,38 @@ class MT5BrokerAdapter(BrokerAdapter):
             code, message = mt5.last_error()
             raise MT5ConnectionError(f"account_info() failed: [{code}] {message}")
         positions = self.get_open_positions()
+        daily_pnl, consecutive_losses = self._daily_stats()
         return AccountState(
             balance=info.balance,
             equity=info.equity,
             margin_used=info.margin,
             open_positions_count=len(positions),
-            daily_pnl=0.0,
-            consecutive_stop_losses_today=0,
+            daily_pnl=daily_pnl,
+            consecutive_stop_losses_today=consecutive_losses,
         )
+
+    @staticmethod
+    def _daily_stats() -> tuple[float, int]:
+        """Real daily P&L and consecutive-losing-trade count from today's closed
+        deals - the circuit breakers in RiskEngine depend on these being real,
+        not placeholders."""
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        deals = mt5.history_deals_get(today_start, datetime.now(timezone.utc))
+        if not deals:
+            return 0.0, 0
+
+        closing_deals = sorted(
+            (d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT), key=lambda d: d.time
+        )
+        daily_pnl = sum(d.profit + d.swap + d.commission for d in closing_deals)
+
+        consecutive_losses = 0
+        for deal in reversed(closing_deals):
+            if deal.profit < 0:
+                consecutive_losses += 1
+            else:
+                break
+        return float(daily_pnl), consecutive_losses
 
     def get_open_positions(self) -> list[Position]:
         raw = mt5.positions_get()
@@ -174,6 +198,15 @@ class MT5BrokerAdapter(BrokerAdapter):
             closed_at=datetime.now(timezone.utc),
             realized_pnl=result.profit if hasattr(result, "profit") else None,
         )
+
+    def get_closed_position_pnl(self, position_id: str) -> float | None:
+        deals = mt5.history_deals_get(position=int(position_id))
+        if not deals:
+            return None
+        closing_deals = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT]
+        if not closing_deals:
+            return None
+        return float(sum(d.profit + d.swap + d.commission for d in closing_deals))
 
     @staticmethod
     def _to_position(raw) -> Position:

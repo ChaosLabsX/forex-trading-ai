@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 
 from engine.core.interfaces.strategy import StrategyContext
 from engine.core.models import Candle, NotificationEvent, Timeframe
@@ -53,8 +53,8 @@ def _candle_row(candle) -> dict:
 
 
 class EngineLoop:
-    """Phase 1 scope: connection management + data persistence only. No
-    strategy evaluation, risk checks, or order execution yet (Phases 2-3)."""
+    """Connection management, data persistence, strategy evaluation, and (as of
+    Phase 3) risk-checked order execution with trade lifecycle tracking."""
 
     def __init__(self, engine: EngineComposition, supabase: SupabaseClient) -> None:
         self._engine = engine
@@ -147,6 +147,7 @@ class EngineLoop:
             try:
                 account_state = broker.get_account_state()
                 open_positions = broker.get_open_positions()
+                self._reconcile_closed_trades(open_positions)
             except Exception:
                 logger.exception("failed to fetch account state/open positions")
 
@@ -215,8 +216,9 @@ class EngineLoop:
                 continue
 
             self._last_evaluated_bar[dedupe_key] = latest_closed_bar_time
-            self._log_signal(strategy.name, symbol, evaluation)
 
+            risk_approved = None
+            risk_reason = None
             if evaluation.signal is not None:
                 logger.info("SIGNAL fired: %s %s %s", strategy.name, symbol, evaluation.signal.direction.value)
                 _notify_all(
@@ -224,10 +226,129 @@ class EngineLoop:
                     "signal_fired",
                     f"{strategy.name} {symbol} {evaluation.signal.direction.value}: {evaluation.reason}",
                 )
+                risk_approved, risk_reason = self._route_through_risk_engine(
+                    strategy.name, evaluation.signal, account_state, open_positions
+                )
             else:
                 logger.info("no signal: %s %s - %s", strategy.name, symbol, evaluation.reason)
 
-    def _log_signal(self, strategy_name: str, symbol: str, evaluation) -> None:
+            self._log_signal(strategy.name, symbol, evaluation, risk_approved, risk_reason)
+
+    def _route_through_risk_engine(self, strategy_name: str, signal, account_state, open_positions) -> tuple:
+        risk_engine = self._engine.risk_engine
+        if risk_engine is None:
+            return None, "no risk engine configured - signal not traded"
+
+        try:
+            decision = risk_engine.validate_signal(signal, account_state, open_positions)
+        except Exception:
+            logger.exception("risk engine failed validating %s %s", strategy_name, signal.symbol)
+            return False, "risk engine raised an exception - see logs"
+
+        if not decision.approved:
+            logger.info("signal rejected by risk engine: %s %s - %s", strategy_name, signal.symbol, decision.reason)
+            _notify_all(self._engine, "signal_rejected", f"{strategy_name} {signal.symbol}: {decision.reason}")
+        elif decision.order is not None:
+            self._open_trade(strategy_name, decision.order)
+
+        return decision.approved, decision.reason
+
+    def _open_trade(self, strategy_name: str, approved_order) -> None:
+        broker = self._engine.broker
+        execution_engine = self._engine.execution_engine
+        if broker is None or execution_engine is None:
+            logger.warning("cannot execute %s: broker or execution_engine not configured", strategy_name)
+            return
+
+        try:
+            position = execution_engine.execute(approved_order, broker)
+        except Exception:
+            logger.exception("order execution failed for %s %s", strategy_name, approved_order.signal.symbol)
+            _notify_all(
+                self._engine,
+                "execution_failed",
+                f"{strategy_name} {approved_order.signal.symbol}: order placement failed, see logs",
+            )
+            return
+
+        try:
+            self._supabase.insert(
+                "trades",
+                [
+                    {
+                        "mt5_ticket": position.id,
+                        "strategy_name": strategy_name,
+                        "symbol": position.symbol,
+                        "direction": position.direction.value,
+                        "lot_size": position.lot_size,
+                        "entry_price": position.entry_price,
+                        "stop_loss": position.stop_loss,
+                        "take_profit": position.take_profit,
+                        "status": "OPEN",
+                        "opened_at": position.opened_at.isoformat(),
+                    }
+                ],
+            )
+        except Exception:
+            logger.exception("failed to persist opened trade %s", position.id)
+
+        logger.info(
+            "TRADE OPENED: %s %s %s %s lot @ %s",
+            strategy_name, position.symbol, position.direction.value, position.lot_size, position.entry_price,
+        )
+        _notify_all(
+            self._engine,
+            "trade_opened",
+            f"{strategy_name} {position.symbol} {position.direction.value} "
+            f"{position.lot_size} lot @ {position.entry_price}",
+        )
+
+    def _reconcile_closed_trades(self, open_positions: list) -> None:
+        broker = self._engine.broker
+        if broker is None:
+            return
+
+        open_tickets = {p.id for p in open_positions}
+        try:
+            open_trade_rows = self._supabase.select("trades", {"status": "eq.OPEN"})
+        except Exception:
+            logger.exception("failed to fetch open trades from Supabase for reconciliation")
+            return
+
+        for row in open_trade_rows:
+            ticket = row["mt5_ticket"]
+            if ticket in open_tickets:
+                continue  # still open
+
+            try:
+                pnl = broker.get_closed_position_pnl(ticket)
+            except Exception:
+                logger.exception("failed to fetch closed P&L for ticket %s", ticket)
+                pnl = None
+
+            try:
+                self._supabase.update(
+                    "trades",
+                    {"mt5_ticket": f"eq.{ticket}"},
+                    {
+                        "status": "CLOSED",
+                        "realized_pnl": pnl,
+                        "closed_at": datetime.now(timezone.utc).isoformat(),
+                    },
+                )
+            except Exception:
+                logger.exception("failed to persist closed trade %s", ticket)
+                continue
+
+            pnl_text = f"{pnl:+.2f}" if pnl is not None else "unknown"
+            logger.info("TRADE CLOSED: %s %s ticket=%s pnl=%s", row["strategy_name"], row["symbol"], ticket, pnl_text)
+            _notify_all(
+                self._engine,
+                "trade_closed",
+                f"{row['strategy_name']} {row['symbol']} closed, P&L: {pnl_text}",
+            )
+
+    def _log_signal(self, strategy_name: str, symbol: str, evaluation, risk_approved=None, risk_reason=None) -> None:
         signal = evaluation.signal
         row = {
             "strategy_name": strategy_name,
@@ -240,6 +361,8 @@ class EngineLoop:
             "take_profit": signal.take_profit if signal else None,
             "reason": evaluation.reason,
             "metadata": signal.metadata if signal else None,
+            "risk_approved": risk_approved,
+            "risk_reason": risk_reason,
         }
         try:
             self._supabase.insert("signals", [row])

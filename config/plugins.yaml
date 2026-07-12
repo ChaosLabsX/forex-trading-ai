@@ -6,8 +6,8 @@ broker: mt5             # implemented; connect() needs the MT5 terminal installe
 market_data: mt5        # implemented; same requirement
 strategies:
   - ema_trend_v1          # reference implementation - see PLAN.md
-risk_engine: null       # "default" - Phase 3
-execution_engine: null  # "default" - Phase 3
+risk_engine: default
+execution_engine: default
 news_provider: placeholder  # always-empty stand-in; real calendar source needs
                              # an API key - manual signup, deferred
 notifications:
