@@ -319,13 +319,15 @@ in the UI - see migrations 0005-0007 and git history). Phase 5 (AI shadow-mode
 review) built and verified live, generating comparison data on every fired
 signal going forward.
 
-`scripts/run_engine.py` is now running continuously as a detached background
-process (started 2026-07-12 22:02 local time, logging to `logs/engine.log` /
-`logs/engine_error.log`) - the 24h+ soak test for Phases 1 and 3's exit
-criteria is underway. It will keep running independent of any chat session as
-long as this Windows machine stays on, MT5 stays logged in, and the process
-isn't killed - it does not yet survive a reboot (that's what Phase 6's NSSM
-service wrapping is for).
+`scripts/run_engine.py` ran continuously as a detached background process from
+2026-07-12 22:02 to 2026-07-13 ~02:35 local time (~4.5h, healthy the whole
+time - no crashes, reconnects, or missed heartbeats) before being intentionally
+stopped so the user could shut down the laptop overnight (zero open positions
+at the time, no risk). Not a crash - a deliberate pause. **Resume by running
+`python scripts/run_engine.py` again** (or asking Claude to) once the laptop's
+back up; the 24h+ soak clock restarts from zero at that point. This will keep
+happening on this hardware until Phase 6 moves the engine to a VPS that
+doesn't depend on this laptop staying on.
 
 Only Phase 6 (VPS deployment + live-readiness checklist) remains, intentionally
 not started - VPS provisioning is a purchase decision for the user to make and
