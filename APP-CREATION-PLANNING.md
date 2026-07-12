@@ -129,14 +129,21 @@ verified live; Telegram bot token verified valid (pending: message the bot once 
 Telegram associates the chat - bots can't push to a chat that hasn't messaged them
 first). IC Markets demo account server noted (`ICMarketsSC-Demo`).
 
-**Phase 1 — MT5 broker adapter + engine skeleton + data feed** ← current
-Implement the first real plugins: `MT5BrokerAdapter` and an MT5 `MarketDataProvider`
-(against a locally-running, logged-in MT5 terminal), plus the polling/candle-
-aggregation loop (H1 execution + H4/Daily context) and a Telegram
-`NotificationProvider` for crash/disconnect alerting. Runs as a plain local script -
-no service wrapping yet (that's Phase 6).
-*Exit: engine runs unattended locally for 24h+ through the plugin-selected MT5
-broker, survives a manual restart, and alerts via Telegram on disconnect.*
+**Phase 1 — MT5 broker adapter + engine skeleton + data feed** ✅ core loop built and verified
+`MT5BrokerAdapter` and `MT5MarketDataProvider` implemented and verified live
+against the real demo account (account state, ticks, H1/H4/D1 candles).
+`TelegramNotifier` implemented and verified live. `engine/loop.py` +
+`scripts/run_engine.py`: connect/reconnect with backoff, Telegram alerts on
+connect/disconnect transitions, heartbeat and candle persistence to Supabase on
+a 60s interval. Schema applied (`supabase/migrations/0001_phase1_market_data.sql`:
+`candles`, `engine_heartbeats`, both RLS-enabled with no policies yet - deny-all
+by default until Phase 4 defines dashboard-facing policies).
+Verified with a live 90s run: connected, sent 2 heartbeats 60s apart, persisted
+300 H1 + 150 H4 + 90 D1 candles for all 4 instruments, confirmed via direct
+Supabase query.
+*Remaining for full exit: leave it running unattended for 24h+ and confirm it
+survives a manual restart without issue - runs as a plain foreground script for
+now (Ctrl+C to stop); no service wrapping until Phase 6.*
 
 **Phase 2 — Reference strategy plugin (rules only, no execution)**
 Implement the EMA trend-following v1 `StrategyPlugin` (regime filter, entry
@@ -185,6 +192,7 @@ One doc per subsystem plus an architecture overview, added as each phase lands
 `/docs/dashboard.md`, `/docs/strategy-ema-trend-v1.md`, `/docs/safety-rails.md`).
 
 ---
-*Status: Phase 0 complete. Phase 1 starting — needs the MT5 terminal installed and
-logged into the IC Markets demo account locally, and one message sent to the
-Telegram bot to activate it.*
+*Status: Phase 0 complete. Phase 1's engine loop is built and verified live
+(MT5 connectivity, Telegram alerts, Supabase persistence all confirmed working).
+Leave `scripts/run_engine.py` running for a 24h+ soak test to fully close out
+Phase 1, then move to Phase 2 (reference strategy plugin).*

@@ -13,4 +13,6 @@ class ConsoleNotifier(NotificationProvider):
         self._settings = settings
 
     def notify(self, event: NotificationEvent) -> None:
-        print(f"[{event.event_type}] {event.message}")
+        # flush explicitly - unflushed stdout can be lost if the process is
+        # killed (e.g. SIGTERM) before Python's normal buffer flush
+        print(f"[{event.event_type}] {event.message}", flush=True)

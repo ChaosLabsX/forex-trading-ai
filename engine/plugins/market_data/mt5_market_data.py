@@ -55,11 +55,13 @@ class MT5MarketDataProvider(MarketDataProvider):
                 symbol=symbol,
                 timeframe=timeframe,
                 time=datetime.fromtimestamp(row["time"], tz=timezone.utc),
-                open=row["open"],
-                high=row["high"],
-                low=row["low"],
-                close=row["close"],
-                volume=row["tick_volume"],
+                # cast explicitly - numpy scalar types (from the structured
+                # array MT5 returns) aren't JSON-serializable as-is
+                open=float(row["open"]),
+                high=float(row["high"]),
+                low=float(row["low"]),
+                close=float(row["close"]),
+                volume=float(row["tick_volume"]),
             )
             for row in raw
         ]
