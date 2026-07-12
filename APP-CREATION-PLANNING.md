@@ -300,18 +300,27 @@ One doc per subsystem plus an architecture overview, added as each phase lands
 `/docs/dashboard.md`, `/docs/strategy-ema-trend-v1.md`, `/docs/safety-rails.md`).
 
 ---
-*Status: Phases 0-2 built and verified live end-to-end. Phase 3 built, risk
-engine approval path verified live; final execution/close/reconciliation
-verification is blocked on the weekend forex market being closed (confirmed via
-a correctly-rejected order, not a bug) and will resume once markets reopen.
-Phase 4 dashboard built and verified live (monitoring views + auth error
-handling + command consumption); needs the user to set their password via the
-Supabase invite email and enable "GitHub Actions" as the Pages build source
-(Settings → Pages) before the live URL goes up. Remaining before calling
-Phases 1-4 fully closed: a 24h+ unattended engine soak test, the pending live
-fill/close check once markets reopen, and the user completing sign-in once to
-confirm the control buttons work end-to-end. Phase 5 (AI shadow-mode review)
-built and verified live, generating comparison data on every fired signal
-going forward. Only Phase 6 (VPS deployment + live-readiness checklist)
-remains, intentionally not started - VPS provisioning is a purchase decision
-for the user to make and initiate.*
+*Status (2026-07-12): Phases 0-2 built and verified live end-to-end. Phase 3
+built, risk engine approval path verified live; final execution/close/
+reconciliation verification is blocked on the weekend forex market being
+closed (confirmed via a correctly-rejected order, not a bug) and will resume
+once markets reopen. Phase 4 dashboard fully working end-to-end - user set
+their password, signed in, and confirmed the control buttons work (a couple
+of real bugs surfaced and fixed along the way: `authenticated`-role 403s from
+a grants oversight, a stray `/forex-trading-ai/` prefix in the local dev URL,
+a missing Supabase Auth `site_url` config, and a missing "set password" step
+in the UI - see migrations 0005-0007 and git history). Phase 5 (AI shadow-mode
+review) built and verified live, generating comparison data on every fired
+signal going forward.
+
+`scripts/run_engine.py` is now running continuously as a detached background
+process (started 2026-07-12 22:02 local time, logging to `logs/engine.log` /
+`logs/engine_error.log`) - the 24h+ soak test for Phases 1 and 3's exit
+criteria is underway. It will keep running independent of any chat session as
+long as this Windows machine stays on, MT5 stays logged in, and the process
+isn't killed - it does not yet survive a reboot (that's what Phase 6's NSSM
+service wrapping is for).
+
+Only Phase 6 (VPS deployment + live-readiness checklist) remains, intentionally
+not started - VPS provisioning is a purchase decision for the user to make and
+initiate.*
