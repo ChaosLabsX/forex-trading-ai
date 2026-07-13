@@ -25,6 +25,19 @@ from engine.supabase_client import SupabaseClient
 
 
 def main() -> None:
+    # Verify TLS against the OS trust store, not OpenSSL's bundled CAs, and do
+    # it before anything opens a connection. On the VPS, api.telegram.org's
+    # certificate chain validates under Windows' own verifier (confirmed via
+    # .NET SslStream: zero policy errors) but not under Python's OpenSSL
+    # default context, which can't build the same path and reports
+    # "self-signed certificate in certificate chain". truststore delegates
+    # verification to Windows' verifier - the one that already trusts this
+    # chain - so verification stays fully on, just sourced from the store that
+    # works. No-op where OpenSSL already succeeds (e.g. Supabase, Anthropic).
+    import truststore
+
+    truststore.inject_into_ssl()
+
     # File handler is what makes this work under Task Scheduler, which
     # doesn't capture stdout/stderr the way a manually-redirected console
     # process does - console handler stays too, for local interactive runs.

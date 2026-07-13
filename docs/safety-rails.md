@@ -117,6 +117,32 @@ direction + lot size at the *same* moment, this could misattribute which
 signal a recovered position belongs to. Not a concern at today's scale (one
 strategy, sequential evaluation), worth revisiting if that changes.
 
+## TLS is verified against the OS trust store, not OpenSSL's bundle
+
+Found live during Phase 6 VPS bring-up: the engine ran fine, MT5 connected,
+and Supabase writes succeeded, but every Telegram notification failed with
+`ssl.SSLCertVerificationError: ... self-signed certificate in certificate
+chain` from `urllib.request.urlopen()` in `telegram_notifier.py`.
+
+It was not a code bug and not a proxy - `telegram_notifier.py` and
+`supabase_client.py` use the identical bare `urllib.request` pattern, and
+Supabase worked. The difference was purely the destination host's chain:
+Windows' own verifier trusted `api.telegram.org` (confirmed via a .NET
+`SslStream` probe returning zero policy errors), but Python's bundled OpenSSL
+couldn't build the same path - Windows does alternate-chain building / AIA
+fetching that OpenSSL doesn't, so OpenSSL dead-ended at a self-signed cert in
+the presented chain.
+
+Fixed by adding `truststore` (a dependency) and calling
+`truststore.inject_into_ssl()` once at the top of `scripts/run_engine.py`,
+before anything opens a socket. This delegates certificate verification to the
+OS verifier (Windows CryptoAPI) - **verification stays fully on**, it's just
+sourced from the store that already trusts the chain, and it also tracks any
+future root changes Windows makes. It's a no-op wherever OpenSSL already
+succeeds (Supabase, the Anthropic API). **Don't "fix" a TLS error here by
+setting `verify_mode = CERT_NONE` or an unverified context in the plugins -
+route trust through the OS store instead.**
+
 ## Known, deliberate gaps (not bugs - documented so they aren't "discovered" again)
 
 - **No breakeven/trailing stop management.** `DefaultExecutionEngine.manage_open_position()`

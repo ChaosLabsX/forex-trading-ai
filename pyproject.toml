@@ -12,6 +12,12 @@ dependencies = [
     # isn't kept as an optional extra.
     "MetaTrader5>=5.0.45",
     "anthropic>=0.40",
+    # Verify TLS against the OS trust store instead of OpenSSL's bundled CAs.
+    # Needed on the VPS: api.telegram.org's chain validates under Windows'
+    # own verifier but not under Python's OpenSSL default context (alternate
+    # chain building / AIA fetching Windows does and OpenSSL doesn't). See
+    # docs/safety-rails.md.
+    "truststore>=0.9",
 ]
 
 [build-system]
