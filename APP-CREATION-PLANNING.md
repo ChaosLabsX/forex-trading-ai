@@ -387,10 +387,22 @@ Dashboard redesigned (2026-07-13): full login gate (DB-enforced via migration
 0008, not just UI-hidden), dark professional theme, KPI stat tiles, and
 mobile-responsive tables that collapse to stacked cards below 700px.
 
-Phase 6 is now underway: VPS provisioned (InterServer, 4 slices, $20/month,
-`162.220.166.12`), deployment automated via `infra/vps-bootstrap.ps1` +
+**Phase 6 complete (2026-07-13): the engine is live and autonomous on the
+VPS.** VPS provisioned (InterServer, 4 slices, $20/month, `162.220.166.12`),
+deployment automated via `infra/vps-bootstrap.ps1` +
 `infra/setup-scheduled-tasks.ps1`, with a corrected process-supervision
 approach (Task Scheduler + auto-login, not NSSM - see the Phase 6 section
-above). `infra/vps-setup.md` has the full ordered checklist for the user to
-execute via their own RDP session - the last mile needs their hands, since
-Claude has no remote access to the VPS.*
+above). The user executed the `infra/vps-setup.md` checklist over their own
+RDP session (Claude has no remote access to the VPS). One real bug surfaced
+and was fixed during bring-up: Telegram notifications failed with an SSL
+"self-signed certificate in certificate chain" error because Python's bundled
+OpenSSL couldn't build a trust path that Windows' own verifier could - fixed
+by adding `truststore` and delegating TLS verification to the OS trust store
+(see `docs/safety-rails.md`). **Reboot test passed:** after a full
+`Restart-Computer`, Windows auto-logged in, MT5 relaunched from its Startup
+shortcut, and the engine's Scheduled Task restarted - all unattended, with a
+clean connect, Telegram confirmation, and the dashboard tile returning to LIVE.
+The engine now runs 24/7 on the VPS independent of the local laptop; the local
+setup remains for development only and must never run concurrently against the
+same account. Phases 0-6 are now all built and live-verified - the original
+roadmap is complete.*

@@ -21,19 +21,21 @@ cross-platform version of the execution side; don't suggest one.
 
 ## Current status (check before assuming what's built)
 
-All 8 subsystem interfaces have a working plugin. Phases 0-5 of
+All 8 subsystem interfaces have a working plugin. Phases 0-6 of
 [`APP-CREATION-PLANNING.md`](APP-CREATION-PLANNING.md) are built and live-
-verified. Phase 6 (VPS deployment) is in progress - VPS is provisioned,
-deployment is scripted (`infra/`), execution is pending the user's own RDP
-session. That file's "Status" line at the very bottom is the single source of
-truth for what's currently running vs. pending - check it before assuming
-something is or isn't done. Don't trust this file's prose to stay perfectly
-in sync; if in doubt, read the code.
+verified - the original roadmap is complete. Phase 6 (VPS deployment) finished
+2026-07-13: the engine runs 24/7 on the VPS via Task Scheduler + auto-login,
+and a full reboot test confirmed unattended recovery (MT5 + engine both come
+back on their own). That file's "Status" line at the very bottom is the single
+source of truth for what's currently running vs. pending - check it before
+assuming something is or isn't done. Don't trust this file's prose to stay
+perfectly in sync; if in doubt, read the code.
 
-The engine currently runs on the local Windows dev machine (MT5 terminal +
-the Python engine side by side); moving to the VPS is Phase 6, underway but
-not yet confirmed running there. Never run both simultaneously against the
-same account (see `infra/vps-setup.md`).
+The engine now runs on the VPS (`162.220.166.12`), not the local dev machine.
+The local setup (MT5 terminal + Python engine side by side) remains for
+development only. **Never run both simultaneously against the same account** -
+two instances could both act on the same signal and double a position (see
+`infra/vps-setup.md`).
 
 ## Architecture in one paragraph
 
