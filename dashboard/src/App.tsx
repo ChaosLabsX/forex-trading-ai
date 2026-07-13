@@ -1,37 +1,24 @@
-import { EngineHealth } from "./components/EngineHealth";
-import { OpenTrades } from "./components/OpenTrades";
-import { TradeHistory } from "./components/TradeHistory";
-import { SignalsFeed } from "./components/SignalsFeed";
 import { Login } from "./components/Login";
-import { Controls } from "./components/Controls";
-import { SetPassword } from "./components/SetPassword";
+import { Dashboard } from "./components/Dashboard";
 import { useAuth } from "./lib/useAuth";
 
 function App() {
   const { session, loading } = useAuth();
 
-  return (
-    <div className="app">
-      <header>
-        <h1>MT5 + IC Markets Trading Automation</h1>
-      </header>
+  if (loading) {
+    return (
+      <div className="gate">
+        <div className="spinner" aria-label="Loading" />
+      </div>
+    );
+  }
 
-      <EngineHealth />
+  // Signed out: nothing but the gate. (Matching RLS change - anon has no
+  // read access to any monitoring table, so this is enforced server-side
+  // too, not just visually.)
+  if (!session) return <Login />;
 
-      {!loading && (session ? (
-        <>
-          <Controls session={session} />
-          <SetPassword />
-        </>
-      ) : (
-        <Login />
-      ))}
-
-      <OpenTrades />
-      <TradeHistory />
-      <SignalsFeed />
-    </div>
-  );
+  return <Dashboard session={session} />;
 }
 
 export default App;

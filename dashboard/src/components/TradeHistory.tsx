@@ -1,84 +1,55 @@
-import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabase";
 import type { Trade } from "../types";
+import { fmtDateTime, fmtMoney, fmtPrice } from "../lib/format";
 
-export function TradeHistory() {
-  const [trades, setTrades] = useState<Trade[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    async function load() {
-      const { data } = await supabase
-        .from("trades")
-        .select("*")
-        .eq("status", "CLOSED")
-        .order("closed_at", { ascending: false })
-        .limit(50);
-      setTrades(data ?? []);
-      setLoading(false);
-    }
-    load();
-  }, []);
-
-  const closedWithPnl = trades.filter((t) => t.realized_pnl !== null);
-  const wins = closedWithPnl.filter((t) => (t.realized_pnl ?? 0) > 0).length;
-  const totalPnl = closedWithPnl.reduce((sum, t) => sum + (t.realized_pnl ?? 0), 0);
-  const winRate = closedWithPnl.length ? (wins / closedWithPnl.length) * 100 : null;
-
+export function TradeHistory({ trades }: { trades: Trade[] }) {
   return (
-    <div className="card">
-      <h2>Trade History</h2>
-      {loading ? (
-        <p>Loading...</p>
-      ) : (
-        <>
-          <div className="stats-row">
-            <div>
-              <span className="stat-value">{closedWithPnl.length}</span>
-              <span className="stat-label">closed trades</span>
-            </div>
-            <div>
-              <span className="stat-value">{winRate !== null ? `${winRate.toFixed(0)}%` : "-"}</span>
-              <span className="stat-label">win rate</span>
-            </div>
-            <div>
-              <span className={`stat-value ${totalPnl >= 0 ? "long" : "short"}`}>
-                {totalPnl >= 0 ? "+" : ""}
-                {totalPnl.toFixed(2)}
-              </span>
-              <span className="stat-label">total P&amp;L</span>
-            </div>
-          </div>
-          {trades.length === 0 ? (
-            <p className="muted">No closed trades yet.</p>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th>Direction</th>
-                  <th>Entry</th>
-                  <th>P&amp;L</th>
-                  <th>Closed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {trades.map((t) => (
+    <section className="section">
+      <div className="section-head">
+        <h2 className="section-title">Trade history</h2>
+        <span className="section-meta">last {trades.length} closed</span>
+      </div>
+      <div className="card">
+        {trades.length === 0 ? (
+          <p className="empty">No closed trades yet - results will appear here.</p>
+        ) : (
+          <table className="rtable">
+            <thead>
+              <tr>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Entry</th>
+                <th>P&amp;L</th>
+                <th>Closed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {trades.map((t) => {
+                const pnl = t.realized_pnl;
+                return (
                   <tr key={t.id}>
-                    <td>{t.symbol}</td>
-                    <td className={t.direction === "LONG" ? "long" : "short"}>{t.direction}</td>
-                    <td>{t.entry_price}</td>
-                    <td className={(t.realized_pnl ?? 0) >= 0 ? "long" : "short"}>
-                      {t.realized_pnl !== null ? t.realized_pnl.toFixed(2) : "unknown"}
+                    <td className="cell-sym" data-label="Symbol">{t.symbol}</td>
+                    <td data-label="Side">
+                      <span className={`badge ${t.direction === "LONG" ? "badge-long" : "badge-short"}`}>
+                        {t.direction === "LONG" ? "▲ LONG" : "▼ SHORT"}
+                      </span>
                     </td>
-                    <td>{t.closed_at ? new Date(t.closed_at).toLocaleString() : "-"}</td>
+                    <td className="cell-num" data-label="Entry">{fmtPrice(t.entry_price)}</td>
+                    <td
+                      className={`cell-num ${pnl !== null ? (pnl > 0 ? "pnl-pos" : pnl < 0 ? "pnl-neg" : "") : ""}`}
+                      data-label="P&L"
+                    >
+                      <strong>{pnl !== null ? fmtMoney(pnl) : "unknown"}</strong>
+                    </td>
+                    <td className="cell-time" data-label="Closed">
+                      {t.closed_at ? fmtDateTime(t.closed_at) : "—"}
+                    </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </>
-      )}
-    </div>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </section>
   );
 }

@@ -13,8 +13,8 @@ export default defineConfig(({ command }) => ({
         name: 'Forex AI',
         short_name: 'Forex AI',
         description: 'MT5 + IC Markets automated trading - monitoring and control',
-        theme_color: '#14161c',
-        background_color: '#14161c',
+        theme_color: '#0d0d0d',
+        background_color: '#0d0d0d',
         display: 'standalone',
         start_url: '.',
         icons: [

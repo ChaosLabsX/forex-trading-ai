@@ -10,36 +10,48 @@ setup commands.
 ```
 src/
   lib/
-    supabase.ts    creates the Supabase client from VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY
-    useAuth.ts      hook: current session, signIn, signOut
+    supabase.ts          creates the Supabase client from VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY
+    useAuth.ts            hook: current session, signIn, signOut
+    useDashboardData.ts   ONE polling loop (15s) for heartbeat + trades + signals
+    format.ts             date/money/relative-time formatting helpers
   components/
-    EngineHealth.tsx    latest heartbeat, staleness check (>3min = stale)
+    Login.tsx            the full-page gate - the only thing a signed-out visitor sees
+    Dashboard.tsx        signed-in layout: topbar, stat tiles, sections, account settings
+    StatTiles.tsx        KPI row: engine LIVE/OFFLINE, open trades, total P&L, win rate
+    Controls.tsx         pause/resume/emergency-close-all
     OpenTrades.tsx       trades where status=OPEN
-    TradeHistory.tsx     trades where status=CLOSED + win-rate/P&L stats
-    SignalsFeed.tsx      recent signals, joined with ai_reviews
-    Login.tsx            email/password sign-in form
-    SetPassword.tsx      shown whenever signed in - needed once after an invite/reset link
-    Controls.tsx         pause/resume/emergency-close-all buttons, shown when signed in
+    TradeHistory.tsx     trades where status=CLOSED
+    SignalsFeed.tsx      recent signals, joined with ai_reviews (rationale in a disclosure)
+    SetPassword.tsx      inside the "Account settings" disclosure at the bottom
   types.ts          TS types mirroring the Supabase schema
-App.tsx             wires it all together: EngineHealth always shown; Controls+SetPassword
-                    when signed in, Login when not; monitoring views always shown
+App.tsx             the gate: loading spinner -> Login (no session) -> Dashboard (session)
 ```
 
-No routing library - it's one page. No state management library - each
-component fetches its own slice of Supabase state with `useEffect` +
-`setInterval` (15s poll; nothing here needs sub-second freshness).
+No routing library - it's one page. No state management library -
+`useDashboardData` runs a single 15s polling loop and passes slices down as
+props (nothing here needs sub-second freshness).
+
+Dark theme only (`color-scheme: dark`), tokens in `src/index.css`. Status
+colors are the fixed dataviz status palette and are always paired with a text
+label (LIVE/OFFLINE, ▲ LONG / ▼ SHORT) - never color alone. Tables use
+`tabular-nums` for numeric columns; below 700px each table collapses into
+stacked cards via CSS (`thead` hidden, `td::before` renders the column label
+from `data-label`), so nothing scrolls horizontally on phones.
 
 ## Auth model
 
-- **Reading** signals/trades/heartbeats/candles/ai_reviews works with **no
-  sign-in** - the anon key has `SELECT` granted via RLS policies (see
-  `supabase/migrations/0005_phase4_dashboard_rls.sql` and
-  `0007_authenticated_read_monitoring.sql`). This is deliberately public: it's
-  a monitoring dashboard, and nothing in those tables is sensitive.
-- **Writing** (pause/resume/emergency-close-all) requires being signed in.
-  `Controls.tsx` inserts into `commands` with `created_by: session.user.id`;
-  RLS only allows `authenticated` to insert, and only with
-  `auth.uid() = created_by`.
+**Everything requires sign-in.** A signed-out visitor sees only the login
+gate - and this is enforced at the database, not just the UI: migration
+`0008_require_login_for_monitoring.sql` revoked the anon role's `SELECT` on
+all monitoring tables (which migrations 0005/0007 had originally granted, from
+the earlier public-monitoring design). The anon key now only powers the auth
+endpoints themselves.
+
+- **Reading** signals/trades/heartbeats/ai_reviews: `authenticated` role only
+  (grants/policies from migration `0007`).
+- **Writing** (pause/resume/emergency-close-all): `Controls.tsx` inserts into
+  `commands` with `created_by: session.user.id`; RLS only allows
+  `authenticated` to insert, and only with `auth.uid() = created_by`.
 - Public sign-up is **disabled** on the Supabase Auth project
   (`disable_signup: true`) - only one invited user exists. There's no
   "register" flow in the UI and there shouldn't be one added without

@@ -1,75 +1,85 @@
-import { useEffect, useState } from "react";
-import { supabase } from "../lib/supabase";
 import type { Signal } from "../types";
+import { fmtDateTime } from "../lib/format";
 
-export function SignalsFeed() {
-  const [signals, setSignals] = useState<Signal[]>([]);
-  const [loading, setLoading] = useState(true);
+function SignalBadge({ signal }: { signal: Signal }) {
+  if (!signal.fired) {
+    return <span className="badge badge-muted">no signal</span>;
+  }
+  const directionBadge = (
+    <span className={`badge ${signal.direction === "LONG" ? "badge-long" : "badge-short"}`}>
+      {signal.direction === "LONG" ? "▲ LONG" : "▼ SHORT"}
+    </span>
+  );
+  if (signal.risk_approved === false) {
+    return (
+      <>
+        {directionBadge} <span className="badge badge-warn">blocked by risk</span>
+      </>
+    );
+  }
+  return directionBadge;
+}
 
-  useEffect(() => {
-    let cancelled = false;
-
-    async function load() {
-      const { data } = await supabase
-        .from("signals")
-        .select("*, ai_reviews(approved, confidence, rationale)")
-        .order("created_at", { ascending: false })
-        .limit(30);
-      if (!cancelled) {
-        setSignals(data ?? []);
-        setLoading(false);
-      }
-    }
-
-    load();
-    const interval = setInterval(load, 15_000);
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, []);
-
+function AIBadge({ signal }: { signal: Signal }) {
+  const review = signal.ai_reviews?.[0];
+  if (!review) return <span className="badge badge-muted">—</span>;
+  const pct = Math.round(review.confidence * 100);
   return (
-    <div className="card">
-      <h2>Recent Signals</h2>
-      {loading ? (
-        <p>Loading...</p>
-      ) : signals.length === 0 ? (
-        <p className="muted">No signals logged yet.</p>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Time</th>
-              <th>Symbol</th>
-              <th>Strategy</th>
-              <th>Fired</th>
-              <th>AI review</th>
-              <th>Reason</th>
-            </tr>
-          </thead>
-          <tbody>
-            {signals.map((s) => {
-              const review = s.ai_reviews?.[0];
-              return (
+    <details className="ai-details">
+      <summary>
+        <span
+          className={`badge ${review.approved ? "badge-long" : "badge-short"}`}
+          title="Claude's shadow-mode second opinion - never blocks a trade"
+        >
+          {review.approved ? "✓ agrees" : "✕ disagrees"} · {pct}%
+        </span>
+      </summary>
+      <p className="ai-rationale">{review.rationale}</p>
+    </details>
+  );
+}
+
+export function SignalsFeed({ signals }: { signals: Signal[] }) {
+  return (
+    <section className="section">
+      <div className="section-head">
+        <h2 className="section-title">Recent signals</h2>
+        <span className="section-meta">every evaluation, fired or filtered</span>
+      </div>
+      <div className="card">
+        {signals.length === 0 ? (
+          <p className="empty">No signals logged yet.</p>
+        ) : (
+          <table className="rtable">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Symbol</th>
+                <th>Signal</th>
+                <th>AI review</th>
+                <th>Reason</th>
+              </tr>
+            </thead>
+            <tbody>
+              {signals.map((s) => (
                 <tr key={s.id}>
-                  <td>{new Date(s.created_at).toLocaleString()}</td>
-                  <td>{s.symbol}</td>
-                  <td>{s.strategy_name}</td>
-                  <td className={s.fired ? "long" : "muted"}>
-                    {s.fired ? s.direction : "no"}
-                    {s.fired && s.risk_approved === false ? " (rejected)" : ""}
+                  <td className="cell-time" data-label="Time">{fmtDateTime(s.created_at)}</td>
+                  <td className="cell-sym" data-label="Symbol">{s.symbol}</td>
+                  <td data-label="Signal">
+                    <SignalBadge signal={s} />
                   </td>
-                  <td className={review ? (review.approved ? "long" : "short") : "muted"}>
-                    {review ? `${review.approved ? "agree" : "disagree"} (${Math.round(review.confidence * 100)}%)` : "-"}
+                  <td className="cell-wide" data-label="AI review">
+                    <AIBadge signal={s} />
                   </td>
-                  <td className="reason">{review ? `${s.reason} — Claude: ${review.rationale}` : s.reason}</td>
+                  <td className="cell-reason cell-wide" data-label="Reason">
+                    {s.reason}
+                  </td>
                 </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      )}
-    </div>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </section>
   );
 }

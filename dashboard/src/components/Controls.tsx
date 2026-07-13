@@ -1,11 +1,9 @@
 import { useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "../lib/supabase";
-import { useAuth } from "../lib/useAuth";
 import type { CommandType } from "../types";
 
 export function Controls({ session }: { session: Session }) {
-  const { signOut } = useAuth();
   const [pending, setPending] = useState<CommandType | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -23,33 +21,37 @@ export function Controls({ session }: { session: Session }) {
       .from("commands")
       .insert({ command_type: commandType, created_by: session.user.id });
     setPending(null);
-    setMessage(error ? `Failed: ${error.message}` : `${commandType} sent - the engine checks in every few seconds.`);
+    setMessage(
+      error
+        ? `Failed: ${error.message}`
+        : `Command sent - the engine picks it up within a few seconds.`
+    );
   }
 
   return (
-    <div className="card">
-      <div className="controls-header">
-        <h2>Controls</h2>
-        <button className="link-button" onClick={() => signOut()}>
-          Sign out ({session.user.email})
-        </button>
+    <section className="section">
+      <div className="section-head">
+        <h2 className="section-title">Controls</h2>
       </div>
-      <div className="controls-buttons">
-        <button disabled={pending !== null} onClick={() => sendCommand("pause")}>
-          Pause trading
-        </button>
-        <button disabled={pending !== null} onClick={() => sendCommand("resume")}>
-          Resume trading
-        </button>
-        <button
-          className="danger"
-          disabled={pending !== null}
-          onClick={() => sendCommand("emergency_close_all")}
-        >
-          Emergency close all
-        </button>
+      <div className="card">
+        <div className="controls-row">
+          <button className="btn" disabled={pending !== null} onClick={() => sendCommand("pause")}>
+            Pause trading
+          </button>
+          <button className="btn" disabled={pending !== null} onClick={() => sendCommand("resume")}>
+            Resume trading
+          </button>
+          <span className="grow" />
+          <button
+            className="btn btn-danger"
+            disabled={pending !== null}
+            onClick={() => sendCommand("emergency_close_all")}
+          >
+            Emergency close all
+          </button>
+        </div>
+        {message && <p className="controls-note">{message}</p>}
       </div>
-      {message && <p className="muted">{message}</p>}
-    </div>
+    </section>
   );
 }

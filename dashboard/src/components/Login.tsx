@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { useAuth } from "../lib/useAuth";
 
+const logoUrl = `${import.meta.env.BASE_URL}pwa-192x192.png`;
+
 export function Login() {
   const { signIn } = useAuth();
   const [email, setEmail] = useState("");
@@ -18,29 +20,34 @@ export function Login() {
   }
 
   return (
-    <div className="card login-card">
-      <h2>Sign in to access controls</h2>
-      <p className="muted">Monitoring above is public; pause/resume/emergency-close require sign-in.</p>
-      <form onSubmit={handleSubmit}>
-        <input
-          type="email"
-          placeholder="Email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <input
-          type="password"
-          placeholder="Password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-        <button type="submit" disabled={submitting}>
-          {submitting ? "Signing in..." : "Sign in"}
-        </button>
-        {error && <p className="status-bad">{error}</p>}
-      </form>
+    <div className="gate">
+      <div className="gate-card">
+        <img src={logoUrl} className="gate-logo" alt="Forex AI logo" />
+        <h1>Forex AI</h1>
+        <p className="gate-sub">Private trading dashboard. Sign in to continue.</p>
+        <form className="gate-form" onSubmit={handleSubmit}>
+          <input
+            type="email"
+            placeholder="Email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+          />
+          <input
+            type="password"
+            placeholder="Password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          <button className="btn btn-primary" type="submit" disabled={submitting}>
+            {submitting ? "Signing in..." : "Sign in"}
+          </button>
+          {error && <p className="form-error">{error}</p>}
+        </form>
+      </div>
     </div>
   );
 }

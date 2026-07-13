@@ -65,11 +65,15 @@ deployment is Phase 6, not started.
 
 - Dashboard is a static SPA (GitHub Pages) using the Supabase **anon** key -
   Row-Level Security policies are the real access boundary, not key secrecy.
-- Monitoring tables (`signals`, `trades`, `engine_heartbeats`, `candles`,
-  `ai_reviews`) grant `SELECT` to **both** `anon` and `authenticated` - a real
-  bug shipped here once (anon-only), causing signed-in users to get 403s,
-  since `supabase-js` sends the user's session JWT once signed in, not the
-  anon key. See `docs/safety-rails.md`.
+- **Everything in the dashboard requires sign-in** (full login gate since
+  migration `0008`): monitoring tables (`signals`, `trades`,
+  `engine_heartbeats`, `candles`, `ai_reviews`) grant `SELECT` to
+  `authenticated` only - anon's read access was revoked when the UI moved
+  behind the gate, so the gate is DB-enforced, not cosmetic. (Historical
+  gotcha that still applies: `supabase-js` sends the user's session JWT once
+  signed in, not the anon key, so `authenticated` needs its own grants -
+  granting only one role causes 403s for the other. See
+  `docs/safety-rails.md`.)
 - The `commands` table only grants `INSERT`/`SELECT` to `authenticated`,
   checked against `auth.uid() = created_by` - control actions require signing
   in. Public sign-up is disabled on the Supabase Auth project; only one

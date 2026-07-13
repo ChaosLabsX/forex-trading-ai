@@ -48,11 +48,13 @@ before implementing, not a quiet default.
 
 The dashboard is a public static site using the Supabase **anon** key - there
 is no secret in the frontend bundle. Row-Level Security is the actual access
-boundary:
+boundary. Since migration `0008` the whole dashboard sits behind a login gate,
+and anon's read access was revoked to match (a UI-only gate would have left
+the data publicly queryable via the REST API):
 
 | Table | `anon` | `authenticated` | `service_role` (engine) |
 |---|---|---|---|
-| `signals`, `trades`, `engine_heartbeats`, `candles`, `ai_reviews` | SELECT | SELECT | ALL |
+| `signals`, `trades`, `engine_heartbeats`, `candles`, `ai_reviews` | none (revoked in `0008`) | SELECT | ALL |
 | `commands` | none | SELECT + INSERT (own rows only, `auth.uid()=created_by`) | ALL |
 
 **Real bug that shipped once:** migration `0005` granted the monitoring tables

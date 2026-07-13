@@ -17,33 +17,31 @@ export function SetPassword() {
     if (error) {
       setError(error.message);
     } else {
-      setMessage("Password set - use it to sign in next time.");
+      setMessage("Password updated.");
       setPassword("");
     }
   }
 
   return (
-    <div className="card">
-      <h2>Set password</h2>
-      <p className="muted">
-        Needed once after following an invite/reset email link - sets the password you'll sign in
-        with going forward.
+    <form className="account-body" onSubmit={handleSubmit}>
+      <p className="account-hint">
+        Change the password you sign in with (also needed once after following an invite or reset
+        email link).
       </p>
-      <form onSubmit={handleSubmit}>
-        <input
-          type="password"
-          placeholder="New password"
-          minLength={6}
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-        <button type="submit" disabled={submitting}>
-          {submitting ? "Saving..." : "Set password"}
-        </button>
-        {message && <p className="status-good">{message}</p>}
-        {error && <p className="status-bad">{error}</p>}
-      </form>
-    </div>
+      <input
+        type="password"
+        placeholder="New password"
+        autoComplete="new-password"
+        minLength={6}
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        required
+      />
+      <button className="btn" type="submit" disabled={submitting}>
+        {submitting ? "Saving..." : "Update password"}
+      </button>
+      {message && <p className="form-ok">{message}</p>}
+      {error && <p className="form-error">{error}</p>}
+    </form>
   );
 }
