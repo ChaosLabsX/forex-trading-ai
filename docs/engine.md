@@ -80,8 +80,9 @@ designed around; a different strategy is a new file + a config change (see
 - **Stop/target:** ATR(14)-based, 1.5x/2.0x - risk scales per-instrument
   automatically instead of a fixed pip value.
 - **Filters:** London/NY session overlap only (12:00-16:00 UTC); news blackout
-  (currently always-empty via the `placeholder` `NewsProvider` - real calendar
-  integration needs an API key, deferred).
+  within 30 min of a high-impact event in a traded currency, from the free
+  ForexFactory calendar (`forexfactory` `NewsProvider`, fails open - see
+  [`safety-rails.md`](safety-rails.md)).
 - Configured instruments: `EURUSD`, `GBPUSD`, `USDJPY`, `XAUUSD`.
 
 Sanity-checked via `scripts/backtest_ema_trend_v1.py`, which replays real

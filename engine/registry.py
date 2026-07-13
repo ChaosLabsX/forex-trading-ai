@@ -26,6 +26,7 @@ PLUGIN_REGISTRY: dict[str, dict[str, str]] = {
     "news_provider": {
         # named "placeholder", not "null", to avoid clashing with YAML's null keyword
         "placeholder": "engine.plugins.news.null_news_provider:NullNewsProvider",
+        "forexfactory": "engine.plugins.news.forexfactory_news_provider:ForexFactoryNewsProvider",
     },
     "notification": {
         "console": "engine.plugins.notifications.console_notifier:ConsoleNotifier",

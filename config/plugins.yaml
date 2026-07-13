@@ -8,8 +8,9 @@ strategies:
   - ema_trend_v1          # reference implementation - see PLAN.md
 risk_engine: default
 execution_engine: default
-news_provider: placeholder  # always-empty stand-in; real calendar source needs
-                             # an API key - manual signup, deferred
+news_provider: forexfactory  # free ForexFactory weekly economic calendar (no
+                             # key). Fails open if the feed is unreachable.
+                             # 'placeholder' reverts to no blackout.
 notifications:
   - console              # always safe - no external dependency
   - telegram              # verified working 2026-07-12

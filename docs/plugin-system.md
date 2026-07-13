@@ -13,7 +13,7 @@ every major subsystem. Core code only ever depends on the abstract interfaces in
 | `StrategyPlugin` | `strategy.py` | `evaluate(context) -> StrategyEvaluation(signal, reason)` | `ema_trend_v1` |
 | `RiskEngine` | `risk.py` | `validate_signal(...) -> RiskDecision` | `default` |
 | `ExecutionEngine` | `execution.py` | `execute(order, broker) -> Position`; `manage_open_position(position, tick, broker)` | `default` |
-| `NewsProvider` | `news.py` | upcoming high-impact events for a news-blackout filter | `placeholder` (always empty - real calendar needs an API key) |
+| `NewsProvider` | `news.py` | upcoming high-impact events for a news-blackout filter | `forexfactory` (free ForexFactory calendar, fails open); `placeholder` (always empty) |
 | `NotificationProvider` | `notification.py` | deliver a lifecycle/alert event | `console` + `telegram` |
 | `AIProvider` | `ai_provider.py` | `review_signal(signal, context) -> AIVerdict`, shadow mode only | `claude` |
 

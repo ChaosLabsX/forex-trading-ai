@@ -173,10 +173,19 @@ properties worth stating explicitly:
 
 ## Known, deliberate gaps (not bugs - documented so they aren't "discovered" again)
 
-- **No real news blackout.** `NullNewsProvider` (registered as `placeholder`)
-  always returns zero events. A real economic calendar needs an API key from
-  a provider (TradingEconomics/Finnhub/FMP etc.) - that's a manual account
-  signup, deliberately not blocking the rest of the system.
+- **News blackout is a best-effort filter, not a guarantee.**
+  `ForexFactoryNewsProvider` (registered as `forexfactory`) pulls the free
+  ForexFactory weekly economic calendar - no API key. The strategy blacks out
+  entries within 30 min of a high-impact event in a traded currency. It's a
+  free community mirror with no SLA, so the provider **fails open**: any
+  fetch/parse error keeps the last good cache or, failing that, applies no
+  blackout (same as the old placeholder) and logs a warning - it never crashes
+  or stalls the loop. So a feed outage silently degrades to "no news filter",
+  which is why the blackout sits on top of the session filter and circuit
+  breakers rather than being relied on alone. (Finnhub's economic calendar,
+  the original plan, turned out to be premium-only; the free ForexFactory feed
+  covers this need without a paid plan. Swapping to a paid/official source is a
+  new plugin + a one-line `plugins.yaml` change.)
 - **No partial position closes.** The `trades` lifecycle is binary
   (`OPEN` → `CLOSED`); scaling out of a position isn't modeled.
 - **Doesn't survive a reboot locally.** On this dev machine the engine runs
