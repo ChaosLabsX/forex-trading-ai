@@ -42,9 +42,10 @@ config/plugins.yaml  which plugin backs each subsystem (not secret, committed)
 3. `RiskEngine` validates a fired signal against account state and safety rails
    (`TEST_MODE` fixed-lot sizing, max concurrent trades, circuit breakers driven
    by real MT5 deal history) -> `RiskDecision`.
-4. `ExecutionEngine` turns an approved decision into orders via `BrokerAdapter`.
-   Breakeven/trailing management is not implemented yet (v1 relies on MT5's
-   native SL/TP enforcement).
+4. `ExecutionEngine` turns an approved decision into orders via `BrokerAdapter`,
+   and while a position is open ratchets its stop toward profit (breakeven at
+   1R, then trailing) - on top of MT5's native SL/TP enforcement. See
+   [`safety-rails.md`](safety-rails.md).
 5. `AIProvider` (Claude) reviews the same fired signal in **shadow mode** -
    logged for later comparison, never gates execution.
 6. Every lifecycle event (signal fired/filtered, risk decision, AI verdict,

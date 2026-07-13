@@ -143,12 +143,36 @@ succeeds (Supabase, the Anthropic API). **Don't "fix" a TLS error here by
 setting `verify_mode = CERT_NONE` or an unverified context in the plugins -
 route trust through the OS store instead.**
 
+## Breakeven / trailing stop management
+
+`DefaultExecutionEngine.manage_open_position()` ratchets the stop toward profit
+while a position is open, called every `MANAGE_INTERVAL_SECONDS` (5s) by the
+loop's `_manage_open_positions()`:
+
+- at `breakeven_at_r` (default 1.0R) profit, the stop moves to entry - the trade
+  can no longer become a loss;
+- past `trail_start_r` (default 2.0R), the stop trails `trail_distance_r`
+  (default 1.0R) behind price.
+
+Thresholds are in R (the trade's initial risk), so they scale per instrument
+without a fixed pip value; all four knobs live on `Settings`
+(`trail_enabled` off reverts to the old leave-it-alone behaviour). Two safety
+properties worth stating explicitly:
+
+- **The stop is only ever moved in the profit-locking direction, never
+  loosened.** A modify is sent only when the new stop improves on the current
+  one by at least `MIN_STEP_R` (0.25R) - which also throttles broker calls and
+  notification spam.
+- **A mid-trade engine restart is safe, not optimal.** The initial-risk cache
+  is in-memory; after a restart it's re-derived from the *current* stop. If that
+  stop was already at breakeven the derived risk is ~0 and management stops for
+  that trade - it stays protected by the breakeven stop but won't trail further.
+  Never unsafe (the stop is still never loosened), just occasionally leaves gain
+  on the table. MT5 continues enforcing whatever stop is set even while the
+  engine is down.
+
 ## Known, deliberate gaps (not bugs - documented so they aren't "discovered" again)
 
-- **No breakeven/trailing stop management.** `DefaultExecutionEngine.manage_open_position()`
-  is a no-op; MT5 enforces the stop/target natively once placed, so positions
-  stay protected even if the engine process is down, but profit-locking
-  strategies described in the original strategy spec aren't implemented.
 - **No real news blackout.** `NullNewsProvider` (registered as `placeholder`)
   always returns zero events. A real economic calendar needs an API key from
   a provider (TradingEconomics/Finnhub/FMP etc.) - that's a manual account

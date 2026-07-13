@@ -26,6 +26,14 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str | None = None
 
+    # Trailing-stop management (DefaultExecutionEngine.manage_open_position).
+    # Thresholds are in R = the trade's initial risk (|entry - first stop|), so
+    # they scale automatically per instrument/ATR instead of a fixed pip value.
+    trail_enabled: bool = True
+    breakeven_at_r: float = 1.0  # move stop to entry once +this many R in profit
+    trail_start_r: float = 2.0  # start trailing once beyond this many R
+    trail_distance_r: float = 1.0  # keep the stop this many R behind price while trailing
+
 
 class PluginConfig(BaseSettings):
     """Which concrete plugin implements each subsystem. Not a secret - safe to

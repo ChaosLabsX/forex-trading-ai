@@ -21,6 +21,10 @@ CANDLE_COUNT = {Timeframe.H1: 300, Timeframe.H4: 250, Timeframe.D1: 90}
 POLL_INTERVAL_SECONDS = 2
 HEARTBEAT_INTERVAL_SECONDS = 60
 CANDLE_REFRESH_INTERVAL_SECONDS = 60
+# Trailing/breakeven stops react to intra-minute price, so manage open
+# positions far more often than the 60s candle cycle (but not every 2s tick -
+# a modify only matters when price has meaningfully advanced).
+MANAGE_INTERVAL_SECONDS = 5
 RECONNECT_BACKOFF_SECONDS = (5, 10, 30, 60)
 
 
@@ -63,6 +67,7 @@ class EngineLoop:
         self._backoff_index = 0
         self._last_heartbeat = 0.0
         self._last_candle_refresh = 0.0
+        self._last_manage = 0.0
         # (strategy_name, symbol) -> timestamp of the last *closed* entry-timeframe
         # bar we evaluated, so we log each closed bar's outcome exactly once
         self._last_evaluated_bar: dict[tuple[str, str], datetime] = {}
@@ -95,6 +100,9 @@ class EngineLoop:
         if self._connected and now - self._last_candle_refresh >= CANDLE_REFRESH_INTERVAL_SECONDS:
             self._refresh_market_data_and_evaluate()
             self._last_candle_refresh = now
+        if self._connected and now - self._last_manage >= MANAGE_INTERVAL_SECONDS:
+            self._manage_open_positions()
+            self._last_manage = now
 
     def _ensure_connected(self) -> None:
         broker = self._engine.broker
@@ -235,6 +243,49 @@ class EngineLoop:
                 broker.close_position(position.id)
             except Exception:
                 logger.exception("failed to close position %s during emergency close-all", position.id)
+
+    def _manage_open_positions(self) -> None:
+        """Per-cycle breakeven/trailing-stop management. Purely protective (it
+        only ever tightens a stop toward profit), so it runs even while paused -
+        pausing stops opening new trades, not guarding open ones."""
+        broker = self._engine.broker
+        execution_engine = self._engine.execution_engine
+        market_data = self._engine.market_data
+        if broker is None or execution_engine is None or market_data is None:
+            return
+
+        try:
+            positions = broker.get_open_positions()
+        except Exception:
+            logger.exception("failed to fetch open positions for stop management")
+            return
+
+        for position in positions:
+            try:
+                tick = market_data.get_latest_tick(position.symbol)
+            except Exception:
+                logger.exception("failed to fetch tick for %s during management", position.symbol)
+                continue
+            try:
+                updated = execution_engine.manage_open_position(position, tick, broker)
+            except Exception:
+                logger.exception("failed managing position %s", position.id)
+                continue
+            if updated is not None:
+                self._on_stop_moved(updated)
+
+    def _on_stop_moved(self, position: Position) -> None:
+        try:
+            self._supabase.update(
+                "trades", {"mt5_ticket": f"eq.{position.id}"}, {"stop_loss": position.stop_loss}
+            )
+        except Exception:
+            logger.exception("failed to sync moved stop for trade %s", position.id)
+        _notify_all(
+            self._engine,
+            "stop_moved",
+            f"{position.symbol} {position.id}: stop moved to {position.stop_loss} (locking in profit).",
+        )
 
     def _evaluate_strategies(
         self,
