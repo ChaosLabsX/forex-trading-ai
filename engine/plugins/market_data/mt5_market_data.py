@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 import MetaTrader5 as mt5
 
 from engine.config import Settings
 from engine.core.interfaces.market_data import MarketDataProvider
 from engine.core.models import Candle, Tick, Timeframe
+from engine.plugins.brokers.mt5_time import measure_server_utc_offset_seconds, server_epoch_to_utc
 
 _TIMEFRAME_MAP = {
     Timeframe.M1: mt5.TIMEFRAME_M1,
@@ -29,6 +28,15 @@ class MT5MarketDataProvider(MarketDataProvider):
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self._server_utc_offset_seconds: float | None = None
+
+    def _offset(self) -> float:
+        # Lazy + cached: this class has no connect() lifecycle hook of its
+        # own (it rides on the broker adapter's mt5.initialize()), so the
+        # offset is measured once on first use rather than eagerly.
+        if self._server_utc_offset_seconds is None:
+            self._server_utc_offset_seconds = measure_server_utc_offset_seconds()
+        return self._server_utc_offset_seconds
 
     def get_latest_tick(self, symbol: str) -> Tick:
         raw = mt5.symbol_info_tick(symbol)
@@ -37,7 +45,7 @@ class MT5MarketDataProvider(MarketDataProvider):
             raise MT5MarketDataError(f"symbol_info_tick({symbol}) failed: [{code}] {message}")
         return Tick(
             symbol=symbol,
-            time=datetime.fromtimestamp(raw.time, tz=timezone.utc),
+            time=server_epoch_to_utc(raw.time, self._offset()),
             bid=raw.bid,
             ask=raw.ask,
         )
@@ -50,11 +58,12 @@ class MT5MarketDataProvider(MarketDataProvider):
             raise MT5MarketDataError(
                 f"copy_rates_from_pos({symbol}, {timeframe}) failed: [{code}] {message}"
             )
+        offset = self._offset()
         return [
             Candle(
                 symbol=symbol,
                 timeframe=timeframe,
-                time=datetime.fromtimestamp(row["time"], tz=timezone.utc),
+                time=server_epoch_to_utc(row["time"], offset),
                 # cast explicitly - numpy scalar types (from the structured
                 # array MT5 returns) aren't JSON-serializable as-is
                 open=float(row["open"]),

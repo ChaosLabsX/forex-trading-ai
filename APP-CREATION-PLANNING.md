@@ -185,7 +185,7 @@ not produce duplicate rows.
 *Exit met for the core loop; only a live multi-day observation period (naturally
 overlapping the Phase 1 24h+ soak test) remains before calling Phase 2 fully done.*
 
-**Phase 3 — Risk engine + execution engine (demo)** — built, partially verified live
+**Phase 3 — Risk engine + execution engine (demo)** — built and fully verified live
 `DefaultRiskEngine` (`TEST_MODE` fixed-lot sizing, max-concurrent-trades cap,
 consecutive-losing-trades circuit breaker, max-daily-loss % circuit breaker -
 both breakers driven off real numbers computed from MT5's own closed-deal
@@ -207,17 +207,31 @@ made/lost.
 The dashboard's `commands` table (originally scoped to this phase) is deferred
 to Phase 4 - it only does anything once a dashboard exists to write to it.
 
-Live verification in progress: manually drove a hand-built signal through
-`DefaultRiskEngine` (approved correctly against a clean account) into
-`DefaultExecutionEngine.execute()` against the real demo account. First attempt
-failed with MT5 retcode 10027 (AutoTrading disabled in the terminal - user
-enabled it). Second attempt failed with retcode 10018 (market closed - it was a
-weekend), which is MT5 correctly refusing the order rather than a bug. Full
-live verification (fill → close → real P&L reconciliation → Telegram) is
-pending the forex market reopening.
-*Exit: still needs the live fill/close/reconciliation check above, then a
-sustained demo run to prove circuit breakers and the lifecycle hold up over
-time.*
+Live verification complete once the market reopened Monday. Along the way this
+surfaced (and fixed) two real bugs, not just confirmed the happy path:
+
+1. **MT5 timestamps are broker server time, not UTC** (measured live: ~3h
+   offset on this IC Markets account). Was silently skewing the session-time
+   filter and the daily circuit-breaker boundary. Fixed with a runtime-measured
+   (not hardcoded) offset - see `docs/safety-rails.md`.
+2. **A client-side order error doesn't mean the order failed.** An attempt
+   that raised `MT5ConnectionError` (MT5 retcode 10012, TIMEOUT) had actually
+   filled on the broker's side - the original code would have lost track of it
+   entirely (a real position with no `trades` row, invisible to reconciliation
+   forever). `_open_trade()` now detects and recovers this case instead of
+   silently orphaning the position - see `docs/safety-rails.md`.
+
+With both fixed, drove a real signal through the full pipeline end-to-end
+against the live demo account: `DefaultRiskEngine` approved it, the order
+filled, `_reconcile_closed_trades()` (the real production code path, not a
+shortcut) detected the close, fetched the real P&L via MT5's deal history
+(+0.10), updated the `trades` row, and fired the Telegram alert. Two earlier
+attempts had failed first with retcode 10027 (AutoTrading disabled - user
+enabled it) and 10018 (market closed - it was the weekend), both MT5 correctly
+refusing the order rather than a bug.
+*Exit: met. Remaining: a sustained multi-day demo run to prove circuit
+breakers and the lifecycle hold up over time (same ongoing soak test as
+Phase 1).*
 
 **Phase 4 — Dashboard** — built and verified live (except real-credential login)
 React + TypeScript SPA (Vite) with public read-only monitoring (engine health/
@@ -329,6 +343,14 @@ back up; the 24h+ soak clock restarts from zero at that point. This will keep
 happening on this hardware until Phase 6 moves the engine to a VPS that
 doesn't depend on this laptop staying on.
 
+**Phase 3's live verification completed 2026-07-13 once the market reopened**
+(see Phase 3 section above) - full fill → close → reconciliation → real P&L →
+Telegram confirmed against the live demo account, with two real bugs found and
+fixed in the process (MT5 server-time-vs-UTC timestamps, and order-timeout
+orphaned-position recovery - both in `docs/safety-rails.md`). Phases 0-5 are
+now all built and live-verified.
+
 Only Phase 6 (VPS deployment + live-readiness checklist) remains, intentionally
 not started - VPS provisioning is a purchase decision for the user to make and
-initiate.*
+initiate. The user is currently comparing VPS providers (leaning toward
+InterServer's 4-slice plan, ~$12/month, for initial testing) before committing.*

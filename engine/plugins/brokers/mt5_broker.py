@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import MetaTrader5 as mt5
 
 from engine.config import Settings
 from engine.core.interfaces.broker import BrokerAdapter
 from engine.core.models import AccountState, Direction, Position, PositionStatus
+from engine.plugins.brokers.mt5_time import measure_server_utc_offset_seconds, server_epoch_to_utc
 
 _ORDER_TYPE = {
     Direction.LONG: mt5.ORDER_TYPE_BUY,
@@ -25,6 +26,7 @@ class MT5BrokerAdapter(BrokerAdapter):
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
+        self._server_utc_offset_seconds: float = 0.0
 
     def connect(self) -> None:
         kwargs: dict = {}
@@ -38,6 +40,14 @@ class MT5BrokerAdapter(BrokerAdapter):
         if not mt5.initialize(**kwargs):
             code, message = mt5.last_error()
             raise MT5ConnectionError(f"mt5.initialize() failed: [{code}] {message}")
+
+        # MT5 timestamps are in the broker's server time, not UTC (confirmed:
+        # ~3h offset on this account) - measured fresh on every (re)connect so
+        # DST transitions don't need a code change.
+        self._server_utc_offset_seconds = measure_server_utc_offset_seconds()
+
+    def _to_utc(self, epoch_seconds: float) -> datetime:
+        return server_epoch_to_utc(epoch_seconds, self._server_utc_offset_seconds)
 
     def disconnect(self) -> None:
         mt5.shutdown()
@@ -61,18 +71,22 @@ class MT5BrokerAdapter(BrokerAdapter):
             consecutive_stop_losses_today=consecutive_losses,
         )
 
-    @staticmethod
-    def _daily_stats() -> tuple[float, int]:
+    def _daily_stats(self) -> tuple[float, int]:
         """Real daily P&L and consecutive-losing-trade count from today's closed
         deals - the circuit breakers in RiskEngine depend on these being real,
-        not placeholders."""
-        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
-        deals = mt5.history_deals_get(today_start, datetime.now(timezone.utc))
+        not placeholders. MT5 deal timestamps are in server time, and the exact
+        timezone semantics of history_deals_get()'s query bounds aren't
+        documented - rather than guess, query a generously wide window (+/-12h)
+        and filter precisely using each deal's own corrected UTC time."""
+        utc_today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        utc_now = datetime.now(timezone.utc)
+        deals = mt5.history_deals_get(utc_today_start - timedelta(hours=12), utc_now + timedelta(hours=12))
         if not deals:
             return 0.0, 0
 
         closing_deals = sorted(
-            (d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT), key=lambda d: d.time
+            (d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT and self._to_utc(d.time) >= utc_today_start),
+            key=lambda d: d.time,
         )
         daily_pnl = sum(d.profit + d.swap + d.commission for d in closing_deals)
 
@@ -194,7 +208,7 @@ class MT5BrokerAdapter(BrokerAdapter):
             stop_loss=existing.sl or None,
             take_profit=existing.tp or None,
             status=PositionStatus.CLOSED,
-            opened_at=datetime.fromtimestamp(existing.time, tz=timezone.utc),
+            opened_at=self._to_utc(existing.time),
             closed_at=datetime.now(timezone.utc),
             realized_pnl=result.profit if hasattr(result, "profit") else None,
         )
@@ -208,8 +222,7 @@ class MT5BrokerAdapter(BrokerAdapter):
             return None
         return float(sum(d.profit + d.swap + d.commission for d in closing_deals))
 
-    @staticmethod
-    def _to_position(raw) -> Position:
+    def _to_position(self, raw) -> Position:
         return Position(
             id=str(raw.ticket),
             symbol=raw.symbol,
@@ -219,5 +232,5 @@ class MT5BrokerAdapter(BrokerAdapter):
             stop_loss=raw.sl or None,
             take_profit=raw.tp or None,
             status=PositionStatus.OPEN,
-            opened_at=datetime.fromtimestamp(raw.time, tz=timezone.utc),
+            opened_at=self._to_utc(raw.time),
         )

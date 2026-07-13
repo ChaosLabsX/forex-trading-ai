@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timezone
 
 from engine.core.interfaces.strategy import StrategyContext
-from engine.core.models import Candle, NotificationEvent, Timeframe
+from engine.core.models import Candle, NotificationEvent, Position, Timeframe
 from engine.registry import EngineComposition
 from engine.supabase_client import SupabaseClient
 
@@ -351,17 +351,53 @@ class EngineLoop:
             logger.warning("cannot execute %s: broker or execution_engine not configured", strategy_name)
             return
 
+        # Snapshot before executing - a client-side error (e.g. a timeout)
+        # doesn't guarantee the broker didn't actually fill the order. Found
+        # live: an order that raised MT5ConnectionError(timeout) had in fact
+        # filled - without this check it becomes a real position with no
+        # trades row, invisible to reconciliation forever.
+        positions_before = {p.id for p in broker.get_open_positions()}
+
         try:
             position = execution_engine.execute(approved_order, broker)
         except Exception:
             logger.exception("order execution failed for %s %s", strategy_name, approved_order.signal.symbol)
+            position = self._find_orphaned_position(broker, approved_order, positions_before)
+            if position is None:
+                _notify_all(
+                    self._engine,
+                    "execution_failed",
+                    f"{strategy_name} {approved_order.signal.symbol}: order placement failed, see logs",
+                )
+                return
+            logger.warning(
+                "order for %s %s actually filled despite a client-side error - recovered as ticket %s",
+                strategy_name, approved_order.signal.symbol, position.id,
+            )
             _notify_all(
                 self._engine,
-                "execution_failed",
-                f"{strategy_name} {approved_order.signal.symbol}: order placement failed, see logs",
+                "trade_recovered",
+                f"{strategy_name} {approved_order.signal.symbol}: order filled despite a client-side "
+                f"error - recovered as ticket {position.id}.",
             )
-            return
 
+        self._persist_opened_trade(strategy_name, position)
+
+    @staticmethod
+    def _find_orphaned_position(broker, approved_order, positions_before: set) -> Position | None:
+        signal = approved_order.signal
+        for position in broker.get_open_positions():
+            if position.id in positions_before:
+                continue
+            if (
+                position.symbol == signal.symbol
+                and position.direction == signal.direction
+                and abs(position.lot_size - approved_order.lot_size) < 1e-9
+            ):
+                return position
+        return None
+
+    def _persist_opened_trade(self, strategy_name: str, position) -> None:
         try:
             self._supabase.insert(
                 "trades",

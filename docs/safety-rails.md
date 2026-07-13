@@ -68,6 +68,53 @@ Public sign-up is disabled on the Supabase Auth project - the only way to gain
 control access is being the one invited account. Don't add a self-serve
 sign-up flow without reconsidering this.
 
+## MT5 timestamps are server time, not UTC
+
+Real bug, found and fixed in live Phase 3 testing: `symbol_info_tick()`,
+`copy_rates_from_pos()`, and `history_deals_get()` all report timestamps in
+the broker's **server time** (measured live on this IC Markets account: ~3
+hours ahead of UTC, consistent with EEST), not UTC - despite the raw value
+being a plain Unix epoch, which makes it easy to assume it's already UTC.
+Code that did `datetime.fromtimestamp(x, tz=timezone.utc)` directly on these
+values was silently 3 hours off. This mattered concretely: the session-time
+filter (`ema_trend_v1`'s London/NY 12:00-16:00 UTC window) was gating trades
+against the wrong 3-hour window, and `_daily_stats()`'s "today" boundary for
+the circuit breakers was similarly skewed.
+
+Fixed via `engine/plugins/brokers/mt5_time.py`: the offset is *measured* at
+runtime (compare a live tick's `.time` against the local system clock's true
+UTC), not hardcoded - a hardcoded value would silently break across DST
+transitions. `MT5BrokerAdapter` remeasures on every `connect()`;
+`MT5MarketDataProvider` measures once lazily and caches it (it has no
+`connect()` lifecycle of its own). `_daily_stats()` no longer trusts
+`history_deals_get()`'s query-bound timezone semantics (undocumented) -
+it queries a generously wide window and filters deals precisely using each
+deal's own corrected UTC time instead.
+
+**If you ever add code that reads an MT5 timestamp field directly, route it
+through `server_epoch_to_utc()` - never `datetime.fromtimestamp(x, tz=timezone.utc)`
+on a raw MT5 value.**
+
+## A client-side order error doesn't mean the order failed
+
+Also found live: `place_order()` raised `MT5ConnectionError` with MT5 retcode
+10012 (TIMEOUT) - the client gave up waiting for a response - but the order
+had actually filled on the broker's side. The original code treated any
+exception from `execute()` as "nothing happened," which meant this specific
+position existed as a real open trade with **no corresponding `trades` row** -
+invisible to `_reconcile_closed_trades()` forever, since that logic only
+checks positions it already knows about.
+
+Fixed in `EngineLoop._open_trade()`: on an execution exception, it now
+snapshots open positions before the attempt and checks for a new, matching
+position (same symbol/direction/lot size) after a failure before giving up -
+recovering and logging it as a `trade_recovered` event instead of silently
+losing track of it. This is a heuristic match, not a guarantee - if you ever
+run multiple concurrent strategies capable of placing the *same* symbol +
+direction + lot size at the *same* moment, this could misattribute which
+signal a recovered position belongs to. Not a concern at today's scale (one
+strategy, sequential evaluation), worth revisiting if that changes.
+
 ## Known, deliberate gaps (not bugs - documented so they aren't "discovered" again)
 
 - **No breakeven/trailing stop management.** `DefaultExecutionEngine.manage_open_position()`
