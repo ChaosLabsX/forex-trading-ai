@@ -69,10 +69,16 @@ python -m venv .venv
 & ".venv\Scripts\python.exe" -m pip install -e .
 Pop-Location
 
+Write-Host "`n== Hardening Windows Firewall (safe to automate - no secrets, additive only) =="
+Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True
+Write-Host "Current inbound allow rules (should just be RDP unless you've added more):"
+Get-NetFirewallRule -Direction Inbound -Enabled True |
+    Where-Object { $_.Action -eq "Allow" } |
+    Format-Table DisplayName, Profile
+
 Write-Host "`n== Done =="
 Write-Host "Next (manual - see infra/vps-setup.md for details):"
 Write-Host "  1. Install the IC Markets MT5 terminal, log into ICMarketsSC-Demo, enable Algo Trading."
-Write-Host "  2. Create $RepoDir\.env with your secrets."
-Write-Host "  3. Configure Windows auto-login (netplwiz) for this account."
-Write-Host "  4. Add an MT5 shortcut to the Startup folder (shell:startup)."
-Write-Host "  5. Run infra\setup-scheduled-tasks.ps1 to register the engine's auto-start task."
+Write-Host "  2. Run netplwiz to configure Windows auto-login for this account."
+Write-Host "  3. Paste-run the second script (has your real secrets - given directly in chat, not in this repo)."
+Write-Host "     It writes .env, creates the MT5 startup shortcut, and registers + starts the engine task."

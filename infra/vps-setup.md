@@ -27,6 +27,11 @@ own restart-on-failure settings replace what NSSM would have provided.
 
 ## Checklist
 
+Consolidated to 5 steps - 2 scripts (one committed, one given directly in
+chat since it carries real secrets) plus 3 things that must stay manual
+(no remote-access tool reaches the VPS, and account/Windows passwords are
+deliberately kept out of anything scripted or seen by Claude).
+
 ### 1. Run the bootstrap script
 
 RDP in, open PowerShell **as Administrator**, then:
@@ -35,31 +40,22 @@ RDP in, open PowerShell **as Administrator**, then:
 irm https://raw.githubusercontent.com/ChaosLabsX/forex-trading-ai/main/infra/vps-bootstrap.ps1 | iex
 ```
 
-(Or copy `infra/vps-bootstrap.ps1`'s contents into a `.ps1` file on the VPS
-and run it - either works. It installs Python + Git, clones the repo to
-`C:\ForexAI`, and sets up the venv. No secrets touched.)
+Installs Python + Git, clones the repo to `C:\ForexAI`, sets up the venv, and
+turns on/confirms Windows Firewall. No secrets touched.
 
-### 2. Install and log into the MT5 terminal
+### 2. Install and log into the MT5 terminal (manual - GUI installer, your credentials)
 
 1. Download the IC Markets MT5 terminal installer from IC Markets' own site
    (inside the VPS's browser).
 2. Install it, launch it, log into the `ICMarketsSC-Demo` account with your
-   own demo credentials (never put these in `.env` - see step 4).
+   own demo credentials (never put these in `.env`).
 3. In the toolbar, enable **Algo Trading** (same requirement as local dev -
    `order_send()` fails with retcode 10027 until this is on).
-4. Note the terminal's install path (e.g.
-   `C:\Program Files\IC Markets - MetaTrader 5\terminal64.exe`) - needed for
-   step 5.
 
-### 3. Create `.env`
+No need to note the install path - the next script finds `terminal64.exe`
+itself.
 
-Create `C:\ForexAI\.env` with the same shape as your local one - real values
-via secure copy-paste (RDP clipboard works fine for this), not retyped by
-hand. `MT5_LOGIN`/`MT5_PASSWORD` stay blank, same reasoning as local: the
-terminal's already logged in, so the Python bridge attaches directly and the
-demo password never needs to live in a file.
-
-### 4. Configure Windows auto-login
+### 3. Configure Windows auto-login (manual - GUI dialog, your Windows password)
 
 Run `netplwiz` (Start → Run), uncheck "Users must enter a user name and
 password to use this computer," enter this account's credentials when
@@ -69,68 +65,31 @@ through Windows' own dialog, never a script or anything Claude sees.
 **Trade-off worth knowing:** Windows stores this password in the registry in
 reversible form (a long-standing Windows limitation, not specific to this
 setup). Anyone with admin/physical access to the VPS could retrieve it. This
-is why RDP + Windows Firewall hardening (step 6) matters - auto-login raises
-the value of keeping unauthorized access out in the first place.
+is why the firewall hardening in step 1 matters - auto-login raises the value
+of keeping unauthorized access out in the first place. Also worth doing
+manually: set a strong Windows account password, and consider moving RDP off
+port 3389 if you're comfortable updating your own client's connection string.
 
-### 5. Auto-start the MT5 terminal at logon
+### 4. Finish setup (second script, given directly in chat - not in this repo)
 
-Press `Win+R`, run `shell:startup`, and drop a shortcut to `terminal64.exe`
-(from step 2.4) into that folder. It'll now launch automatically whenever
-this account logs in - including the automatic logon from step 4.
+Ask Claude for it once steps 1-3 are done. It writes `.env` with your real
+secrets (never committed, since this repo is public), auto-detects
+`terminal64.exe` and drops a shortcut in the Startup folder, registers the
+Scheduled Task from `infra/setup-scheduled-tasks.ps1`, starts the engine
+immediately, and tails the first bit of log output so you can see it connect
+live - all one paste.
 
-### 6. Harden the VPS
+### 5. Verify end-to-end
 
-Run in an Administrator PowerShell:
-
-```powershell
-# Confirm Windows Firewall is on for all profiles
-Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled True
-
-# Restrict RDP to just what's needed (it's already the only inbound rule
-# InterServer opens by default) - verify no unexpected extra rules exist:
-Get-NetFirewallRule -Direction Inbound -Enabled True | Where-Object { $_.Action -eq "Allow" } | Format-Table DisplayName, Profile
-```
-
-Also worth doing manually:
-- Set a strong Windows account password (you'll need it for RDP regardless of
-  auto-login, and it's what auto-login's stored credential actually is).
-- Windows Update: leave automatic updates on (security patches matter more
-  than avoiding a reboot), and rely on auto-login + Task Scheduler (step 7) to
-  bring everything back up automatically after any update-triggered restart -
-  don't disable updates to dodge this, fix the recovery path instead, which
-  is what steps 4/5/7 do.
-- Consider changing the RDP port from the 3389 default (reduces automated
-  scanning noise; doesn't replace a strong password) - only if you're
-  comfortable updating your own RDP client's connection string afterward.
-
-### 7. Register the engine's auto-start task
-
-Only after steps 1-3 are done (venv exists, MT5 is logged in, `.env` exists):
-
-```powershell
-cd C:\ForexAI
-.\infra\setup-scheduled-tasks.ps1
-```
-
-This registers a Scheduled Task that starts the engine when this account logs
-on and restarts it automatically on failure. Start it immediately without
-waiting for a reboot:
-
-```powershell
-Start-ScheduledTask -TaskName "ForexAI-Engine"
-Get-Content C:\ForexAI\logs\engine.log -Tail 20 -Wait
-```
-
-### 8. Verify end-to-end
-
-- Watch `logs\engine.log` for a clean connect + first heartbeat.
+- Confirm `logs\engine.log` showed a clean connect + first heartbeat (the
+  previous script's tail should already show this).
 - Check the dashboard - the Engine tile should flip to LIVE within ~60s.
 - Reboot the VPS (`Restart-Computer`) once, wait a few minutes, and confirm
   the terminal + engine both come back on their own (proves auto-login +
   Task Scheduler are wired correctly) - this is the actual test of "survives
   a reboot," not just reading the config.
 
-### 9. Stop the local engine
+### 6. Stop the local engine
 
 Once the VPS engine is confirmed running, **do not also run it locally at the
 same time** - two independent instances evaluating the same strategy against
