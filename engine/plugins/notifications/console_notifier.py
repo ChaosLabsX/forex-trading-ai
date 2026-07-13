@@ -1,18 +1,24 @@
 from __future__ import annotations
 
+import logging
+
 from engine.config import Settings
 from engine.core.interfaces.notification import NotificationProvider
 from engine.core.models import NotificationEvent
 
+logger = logging.getLogger("engine.notify")
+
 
 class ConsoleNotifier(NotificationProvider):
-    """Prints to stdout. No credentials needed - exists to prove the plugin/
-    registry pattern end-to-end without depending on Telegram/MT5/Supabase."""
+    """Logs via the `logging` module rather than print() - a bare print()
+    goes nowhere under Task Scheduler (no attached console), while logging
+    flows into whatever handlers scripts/run_engine.py configured (rotating
+    file + console). No credentials needed - also exists to prove the
+    plugin/registry pattern end-to-end without depending on Telegram/MT5/
+    Supabase."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
 
     def notify(self, event: NotificationEvent) -> None:
-        # flush explicitly - unflushed stdout can be lost if the process is
-        # killed (e.g. SIGTERM) before Python's normal buffer flush
-        print(f"[{event.event_type}] {event.message}", flush=True)
+        logger.info("[%s] %s", event.event_type, event.message)

@@ -90,7 +90,7 @@ AI-assisted, and ML-based strategies are all meant to slot in later as additiona
 | Engine structure | Single Python modular monolith, subsystems wired via the plugin interfaces above | vs. microservices — MT5 access is local-only anyway, so network-split services would add latency and ops surface for no benefit at one-VPS scale. |
 | Dashboard ↔ VPS commands | Postgres `commands` table, VPS subscribes via **Supabase Realtime** | vs. polling (too slow for an emergency stop) or a dedicated broker like Redis/RabbitMQ (unneeded infra for a single-user queue). |
 | Dashboard security model | Static SPA + Supabase anon key; **RLS policies are the actual boundary** (narrow `SELECT`s, writes only via validated Postgres RPCs) | Necessary because GitHub Pages can't hide secrets — the service-role key stays VPS-side only. |
-| Process supervision | NSSM-wrapped Windows service (auto-start, auto-restart on crash) — **applied at VPS deployment (Phase 6)**, not during local development | vs. hand-rolled `pywin32` service (more code, no benefit) or Task Scheduler (weaker restart-on-crash semantics). Locally, the engine just runs as a plain script while developing. |
+| Process supervision | **Corrected in Phase 6** (see that section): Windows auto-login + Task Scheduler "at logon" trigger, not NSSM — **applied at VPS deployment**, not during local development | The original plan assumed an NSSM Windows service; discovered during Phase 6 that MT5's Python bridge needs an interactive desktop session, which a Session-0 Windows service structurally can't provide. Task Scheduler's restart-on-failure settings give the same auto-restart property while running in the right session. Locally, the engine just runs as a plain script while developing. |
 | Repo layout | Single monorepo: `/engine`, `/dashboard`, `/docs`, `/infra` | vs. split repos — unnecessary sync overhead for a solo project. |
 
 ## Reference strategy plugin v1 — multi-timeframe trend-following
@@ -302,15 +302,48 @@ signal. A documented rules-only vs. AI-reviewed comparison needs a real
 sample of live signals to accumulate first - revisit once Phase 3's live
 trading has run for a while.*
 
-**Phase 6 — VPS deployment + live-readiness checklist**
-Provision the Windows VPS ([`infra/vps-setup.md`](infra/vps-setup.md)), move the
-already-locally-verified engine over, wrap it as an NSSM Windows service
-(auto-start, auto-restart on crash). Define objective demo criteria to graduate
-(minimum trade sample size, drawdown behavior, uptime track record). Security pass
-(secrets rotation, RLS audit, VPS hardening/firewall/restricted remote access).
-Confirm the plugin boundaries held in practice — swapping any one plugin during
-development never required touching another subsystem. Document the live cutover
-procedure (`TEST_MODE` off, live sizing rules, rollback plan).
+**Phase 6 — VPS deployment + live-readiness checklist** — VPS provisioned, deployment scripted, execution pending on the user
+User provisioned the VPS: InterServer Windows Cloud Compute, 4 slices
+(2 cores/8GB/160GB SSD), $20/month, Hyper-V, IP `162.220.166.12`.
+
+**Corrected the process-supervision approach before implementing it** (per the
+standing instruction to flag a better decision before proceeding, not just
+follow the original plan): the original plan called for wrapping the engine
+as an NSSM Windows service. MT5's Python bridge needs an interactive desktop
+session - Windows services run in Session 0, which is isolated from any
+desktop session by design, so an NSSM-wrapped engine could never actually see
+MT5, no matter how correctly everything else was configured. Replaced with
+**Windows auto-login + Task Scheduler "at logon" triggers** for both the MT5
+terminal and the engine (same real session), with Task Scheduler's own
+restart-on-failure settings standing in for what NSSM would have provided.
+See `docs/safety-rails.md` for the full explanation.
+
+Built and locally verified: `infra/vps-bootstrap.ps1` (installs Python+Git,
+clones the repo, sets up the venv - winget with a direct-download fallback in
+case the VPS lacks winget, common on Windows Server) and
+`infra/setup-scheduled-tasks.ps1` (registers the engine's auto-start task).
+Along the way, fixed a real gap this surfaced: `scripts/run_engine.py` only
+logged to stdout, and `ConsoleNotifier` used a bare `print()` - neither
+would have produced any output at all under Task Scheduler, which has no
+attached console to redirect. Fixed: file-based rotating log handler in
+`run_engine.py`, `ConsoleNotifier` now logs via the `logging` module instead
+of `print()` - works identically under RDP-Start-Process, Task Scheduler, or
+a plain terminal.
+
+`infra/vps-setup.md` has the full ordered checklist (bootstrap script → MT5
+terminal install/login/Algo-Trading → `.env` → Windows auto-login → MT5
+startup-folder shortcut → firewall hardening → register the scheduled task →
+verify with an actual reboot → stop the local engine so only one instance
+runs against the account).
+
+*Remaining, in order: the user runs the checklist above (needs their own RDP
+session - Claude has no remote access to the VPS and won't handle its Windows
+login credentials); then the objective demo-graduation criteria (minimum
+trade sample size, drawdown behavior, uptime track record), a security pass
+beyond what's in the checklist (secrets rotation - some of these secrets have
+been pasted around a lot during development; RLS audit), and the documented
+live cutover procedure (`TEST_MODE` off, live sizing rules, rollback plan)
+still need to be written.*
 *Exit: a deliberate, documented go/no-go decision — never automatic.*
 
 ## Docs
@@ -350,7 +383,14 @@ fixed in the process (MT5 server-time-vs-UTC timestamps, and order-timeout
 orphaned-position recovery - both in `docs/safety-rails.md`). Phases 0-5 are
 now all built and live-verified.
 
-Only Phase 6 (VPS deployment + live-readiness checklist) remains, intentionally
-not started - VPS provisioning is a purchase decision for the user to make and
-initiate. The user is currently comparing VPS providers (leaning toward
-InterServer's 4-slice plan, ~$12/month, for initial testing) before committing.*
+Dashboard redesigned (2026-07-13): full login gate (DB-enforced via migration
+0008, not just UI-hidden), dark professional theme, KPI stat tiles, and
+mobile-responsive tables that collapse to stacked cards below 700px.
+
+Phase 6 is now underway: VPS provisioned (InterServer, 4 slices, $20/month,
+`162.220.166.12`), deployment automated via `infra/vps-bootstrap.ps1` +
+`infra/setup-scheduled-tasks.ps1`, with a corrected process-supervision
+approach (Task Scheduler + auto-login, not NSSM - see the Phase 6 section
+above). `infra/vps-setup.md` has the full ordered checklist for the user to
+execute via their own RDP session - the last mile needs their hands, since
+Claude has no remote access to the VPS.*

@@ -110,7 +110,12 @@ python scripts/smoke_test_registry.py    # no external calls - just proves the r
 python scripts/run_engine.py             # the real loop - needs MT5 terminal open + logged in
 ```
 
-Currently run as a detached background process (`Start-Process` on Windows,
-not tied to any particular shell session) rather than a proper Windows
-service - that's Phase 6's NSSM wrapping. Logs go to `logs/engine.log`
-(notifications) and `logs/engine_error.log` (Python `logging` output).
+Locally, still run as a detached background process (`Start-Process`, not
+tied to any shell session). On the VPS (Phase 6), it runs via a Task
+Scheduler "at logon" trigger instead of a Windows service - MT5's Python
+bridge needs an interactive desktop session, which a Session-0 service can't
+provide; see `infra/vps-setup.md`. Either way, logs go to `logs/engine.log`
+(rotating file handler, `scripts/run_engine.py`) - both Python's own logging
+and every `NotificationProvider` event (`ConsoleNotifier` logs rather than
+`print()`s, specifically so it's captured under Task Scheduler, which has no
+attached console to redirect).

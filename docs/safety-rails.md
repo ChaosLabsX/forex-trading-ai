@@ -129,6 +129,20 @@ strategy, sequential evaluation), worth revisiting if that changes.
   signup, deliberately not blocking the rest of the system.
 - **No partial position closes.** The `trades` lifecycle is binary
   (`OPEN` → `CLOSED`); scaling out of a position isn't modeled.
-- **Doesn't survive a reboot.** The engine runs as a detached background
-  process, not a Windows service - Phase 6's NSSM wrapping is what adds
-  auto-restart/boot-survival.
+- **Doesn't survive a reboot locally.** On this dev machine the engine runs
+  as a detached background process with nothing to bring it back after a
+  restart. On the VPS (Phase 6), Windows auto-login + a Task Scheduler "at
+  logon" trigger (not a Windows service - see below) provide that.
+
+## Why the VPS uses Task Scheduler, not a Windows service (NSSM)
+
+The original plan called for wrapping the engine as an NSSM Windows service.
+Corrected during Phase 6: MT5's Python bridge (`mt5.initialize()`) requires
+running in the **same interactive desktop session** as the MT5 terminal GUI.
+Windows services run in Session 0, which is isolated from any desktop session
+by design - an NSSM-wrapped engine would never be able to see MT5, no matter
+how correctly everything else was configured. The fix: Windows auto-login
+brings up a real desktop session on boot, and a Task Scheduler "at logon"
+trigger starts both the MT5 terminal and the engine into that same session.
+Task Scheduler's own restart-on-failure settings (`infra/setup-scheduled-tasks.ps1`)
+replace what NSSM would have provided. See `infra/vps-setup.md`.

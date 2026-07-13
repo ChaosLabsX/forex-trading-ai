@@ -22,14 +22,18 @@ cross-platform version of the execution side; don't suggest one.
 ## Current status (check before assuming what's built)
 
 All 8 subsystem interfaces have a working plugin. Phases 0-5 of
-[`APP-CREATION-PLANNING.md`](APP-CREATION-PLANNING.md) are built; Phase 6 (VPS
-deployment) is intentionally not started. That file's "Status" line at the very
-bottom is the single source of truth for what's currently running vs. pending -
-check it before assuming something is or isn't done. Don't trust this file's
-prose to stay perfectly in sync; if in doubt, read the code.
+[`APP-CREATION-PLANNING.md`](APP-CREATION-PLANNING.md) are built and live-
+verified. Phase 6 (VPS deployment) is in progress - VPS is provisioned,
+deployment is scripted (`infra/`), execution is pending the user's own RDP
+session. That file's "Status" line at the very bottom is the single source of
+truth for what's currently running vs. pending - check it before assuming
+something is or isn't done. Don't trust this file's prose to stay perfectly
+in sync; if in doubt, read the code.
 
-Everything currently runs on a local Windows dev machine (MT5 terminal + the
-Python engine side by side), not a VPS.
+The engine currently runs on the local Windows dev machine (MT5 terminal +
+the Python engine side by side); moving to the VPS is Phase 6, underway but
+not yet confirmed running there. Never run both simultaneously against the
+same account (see `infra/vps-setup.md`).
 
 ## Architecture in one paragraph
 
@@ -57,7 +61,7 @@ broker/strategy/provider without touching anything else.
 | [`docs/engine.md`](docs/engine.md) | the Python engine in depth - loop mechanics, each plugin's actual behavior |
 | [`docs/dashboard.md`](docs/dashboard.md) | the React dashboard in depth - structure, auth model, how to add a view |
 | [`docs/safety-rails.md`](docs/safety-rails.md) | `TEST_MODE`, circuit breakers, the RLS security model, known gaps |
-| [`infra/vps-setup.md`](infra/vps-setup.md) | VPS provisioning guidance for Phase 6 (not executed yet) |
+| [`infra/vps-setup.md`](infra/vps-setup.md) | VPS setup - Phase 6, VPS is provisioned, checklist in progress |
 
 ## Conventions specific to this repo
 
@@ -65,6 +69,8 @@ broker/strategy/provider without touching anything else.
 - **Secrets live in `.env` (root, for the engine) and `dashboard/.env` (for the dashboard's build-time Supabase URL/anon key) - both gitignored.** `config/plugins.yaml` is not secret and is committed; it only names which plugin backs each subsystem.
 - **Migrations in `supabase/migrations/` are numbered and additive - never edit an already-applied one.** They're applied directly via the Supabase Management API (no `supabase` CLI is in use); each file's own header comment says what it does and why.
 - **RLS is the dashboard's real security boundary, not the anon key.** Every table the dashboard reads needs explicit grants + policies for *both* `anon` and `authenticated` roles if signed-in users need to see it too - a real bug here (403s for signed-in users) came from granting `anon` only. See `docs/safety-rails.md`.
+- **The dashboard requires sign-in for everything, including reads** (since migration `0008`) - anon has zero grants on the monitoring tables. Don't reintroduce public read access without a deliberate reason.
+- **The engine runs via Task Scheduler on the VPS, never a Windows service/NSSM.** MT5's Python bridge needs an interactive desktop session; Session-0 services can't provide one. See `docs/safety-rails.md` and `infra/vps-setup.md`.
 - **Indicators (`engine/indicators.py`) are hand-rolled, not a TA library dependency** - EMA/ATR/ADX, small and dependency-free on purpose.
 - **`StrategyPlugin.evaluate()` returns `StrategyEvaluation(signal, reason)`, not a bare `Signal | None`** - every evaluation gets logged with why, fired or not.
 - Windows-only project: use PowerShell conventions, backslash paths are fine, and don't suggest Docker/Linux-only tooling for anything that touches MT5.
