@@ -13,5 +13,12 @@ class AIProvider(ABC):
     configured just skips this review step entirely.
     """
 
+    @property
+    @abstractmethod
+    def model_name(self) -> str:
+        """Identifier of the model behind the verdicts, so callers persist what
+        actually ran instead of a second hardcoded copy that can drift."""
+        ...
+
     @abstractmethod
     def review_signal(self, signal: Signal, context: StrategyContext) -> AIVerdict: ...

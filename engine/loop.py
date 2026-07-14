@@ -534,7 +534,9 @@ class EngineLoop:
                 [
                     {
                         "signal_id": signal_id,
-                        "model": "claude-sonnet-5",
+                        # from the provider, never a second hardcoded copy - the
+                        # stored label must be the model that actually ran
+                        "model": ai_provider.model_name,
                         "approved": verdict.approved,
                         "confidence": verdict.confidence,
                         "rationale": verdict.rationale,

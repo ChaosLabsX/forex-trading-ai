@@ -7,7 +7,11 @@ from engine.core.interfaces.ai_provider import AIProvider
 from engine.core.interfaces.strategy import StrategyContext
 from engine.core.models import AIVerdict, Signal
 
-MODEL = "claude-sonnet-5"
+# Opus for the review: this is a judgement call on a real trade, and the whole
+# point of shadow mode is to build a track record worth trusting later - a
+# cheaper model would make that record less meaningful. Reviews only run when a
+# signal actually fires (rare), so the cost is negligible.
+MODEL = "claude-opus-4-8"
 
 _VERDICT_TOOL = {
     "name": "submit_verdict",
@@ -42,6 +46,10 @@ class ClaudeAIProvider(AIProvider):
         if not settings.anthropic_api_key:
             raise ValueError("ANTHROPIC_API_KEY must be set in .env")
         self._client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+
+    @property
+    def model_name(self) -> str:
+        return MODEL
 
     def review_signal(self, signal: Signal, context: StrategyContext) -> AIVerdict:
         response = self._client.messages.create(

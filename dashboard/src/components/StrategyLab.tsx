@@ -84,18 +84,18 @@ export function StrategyLab() {
         </div>
       )}
 
-      <div className="card card-flush">
-        <table className="tbl">
+      <div className="card">
+        <table className="rtable lab-table">
           <thead>
             <tr>
               <th>Strategy</th>
               <th>Verdict</th>
-              <th className="num">Trades</th>
-              <th className="num">Win</th>
-              <th className="num">Expectancy</th>
-              <th className="num">95% CI</th>
-              <th className="num">PF</th>
-              <th className="num">Max DD</th>
+              <th>Trades</th>
+              <th>Win</th>
+              <th>Expectancy</th>
+              <th>95% CI</th>
+              <th>PF</th>
+              <th>Max DD</th>
               <th>Demo</th>
               <th>Live</th>
             </tr>
@@ -114,25 +114,29 @@ export function StrategyLab() {
                     className="row-click"
                     onClick={() => setSelected(open ? null : strategy.name)}
                   >
-                    <td>
-                      <span className="mono">{strategy.display_name || strategy.name}</span>
+                    <td className="cell-sym" data-label="Strategy">
+                      {strategy.display_name || strategy.name}
                     </td>
-                    <td>
+                    <td data-label="Verdict">
                       <span className={`badge ${VERDICT_CLASS[strategy.readiness]}`}>
                         {VERDICT_LABEL[strategy.readiness]}
                       </span>
                     </td>
-                    <td className="num">{evaluation?.trades_count ?? 0}</td>
-                    <td className="num">{fmt(evaluation?.win_rate, 0, "%")}</td>
-                    <td className="num">{fmt(evaluation?.expectancy_r, 3, "R")}</td>
-                    <td className="num">
+                    <td className="cell-num" data-label="Trades">{evaluation?.trades_count ?? 0}</td>
+                    <td className="cell-num" data-label="Win">{fmt(evaluation?.win_rate, 0, "%")}</td>
+                    <td className="cell-num" data-label="Expectancy">
+                      {fmt(evaluation?.expectancy_r, 3, "R")}
+                    </td>
+                    <td className="cell-num" data-label="95% CI">
                       {evaluation?.ci_low != null && evaluation?.ci_high != null
                         ? `[${evaluation.ci_low.toFixed(2)}, ${evaluation.ci_high.toFixed(2)}]`
                         : "—"}
                     </td>
-                    <td className="num">{fmt(evaluation?.profit_factor)}</td>
-                    <td className="num">{fmt(evaluation?.max_drawdown_r, 1, "R")}</td>
-                    <td onClick={(e) => e.stopPropagation()}>
+                    <td className="cell-num" data-label="PF">{fmt(evaluation?.profit_factor)}</td>
+                    <td className="cell-num" data-label="Max DD">
+                      {fmt(evaluation?.max_drawdown_r, 1, "R")}
+                    </td>
+                    <td data-label="Demo" onClick={(e) => e.stopPropagation()}>
                       {demoLink ? (
                         <label className="switch">
                           <input
@@ -147,7 +151,7 @@ export function StrategyLab() {
                         "—"
                       )}
                     </td>
-                    <td onClick={(e) => e.stopPropagation()}>
+                    <td data-label="Live" onClick={(e) => e.stopPropagation()}>
                       {liveLink ? (
                         <label className="switch">
                           <input
@@ -170,7 +174,7 @@ export function StrategyLab() {
                     </td>
                   </tr>
                   {open && (
-                    <tr>
+                    <tr className="report-row">
                       <td colSpan={10} className="report-cell">
                         <StrategyReport
                           strategy={strategy}

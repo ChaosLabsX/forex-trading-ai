@@ -290,13 +290,14 @@ body {
 .switch { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12.5px; }
 .switch input { accent-color: var(--accent); cursor: pointer; }
 
-.report-cell { background: var(--bg-inset); padding: 16px !important; }
+.rtable .report-cell { background: var(--bg-inset); padding: 16px; }
 .report-verdict { font-size: 13px; color: var(--ink-2); margin: 0 0 6px; line-height: 1.5; }
 .report-desc { font-size: 12.5px; color: var(--ink-muted); margin: 0 0 14px; }
 
 .report-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  /* minmax(0, ...) so a long value can't push the column past the viewport */
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
   gap: 16px;
 }
 
@@ -646,6 +647,38 @@ input:focus {
 
   .rtable .cell-reason {
     min-width: 0;
+  }
+
+  /* Strategy lab: each strategy becomes a card of labelled rows, but the
+     expanded report is a panel - it must not inherit the card/label treatment
+     or it renders as an empty-labelled row wrapped in a second card. */
+  .lab-table .report-row {
+    background: none;
+    border: none;
+    border-radius: 0;
+    padding: 0;
+    margin: -6px 0 10px;
+  }
+
+  .rtable.lab-table .report-cell {
+    display: block;
+    padding: 12px;
+    border-radius: var(--radius-sm);
+  }
+
+  .lab-table .report-cell::before {
+    content: none;
+  }
+
+  /* Toggles read better hugging their label than pushed to the far edge. */
+  .lab-table td .switch {
+    margin-left: auto;
+  }
+}
+
+@media (max-width: 380px) {
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
