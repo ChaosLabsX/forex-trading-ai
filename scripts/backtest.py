@@ -38,6 +38,7 @@ parameters and is not walk-forward out-of-sample. Treat a positive result as
 
 from __future__ import annotations
 
+import statistics
 import sys
 from bisect import bisect_right
 from dataclasses import dataclass
@@ -260,7 +261,7 @@ def summarize(label: str, outcomes: list[TradeOutcome]) -> None:
     print(f"  avg win / loss   {avg_win:+.2f}R / {avg_loss:+.2f}R")
     print(f"  profit factor    {profit_factor:.2f}")
     print(f"  max drawdown     {max_drawdown_r(net_rs):.2f}R")
-    print(f"  longest losing   {longest_losing_streak(outcomes)} in a row")
+    print(f"  longest losing   {longest_losing_streak(net_rs)} in a row")
     print(f"  expectancy 95%CI [{lo:+.3f}, {hi:+.3f}] R/trade  -> edge {edge}")
     print()
 
