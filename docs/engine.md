@@ -115,7 +115,10 @@ Locally, still run as a detached background process (`Start-Process`, not
 tied to any shell session). On the VPS (Phase 6), it runs via a Task
 Scheduler "at logon" trigger instead of a Windows service - MT5's Python
 bridge needs an interactive desktop session, which a Session-0 service can't
-provide; see `infra/vps-setup.md`. Either way, logs go to `logs/engine.log`
+provide; see `infra/vps-setup.md`. Either way, logs go to
+`logs/engine-<ACCOUNT_KEY>.log` (one file per account - the demo and live
+engines are separate processes and `RotatingFileHandler` is not safe across
+processes, so they must never share a file)
 (rotating file handler, `scripts/run_engine.py`) - both Python's own logging
 and every `NotificationProvider` event (`ConsoleNotifier` logs rather than
 `print()`s, specifically so it's captured under Task Scheduler, which has no

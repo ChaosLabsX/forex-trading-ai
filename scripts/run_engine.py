@@ -47,9 +47,15 @@ def main() -> None:
         except (AttributeError, ValueError):
             pass
 
+    settings = Settings()
+
     # File handler is what makes this work under Task Scheduler, which
     # doesn't capture stdout/stderr the way a manually-redirected console
     # process does - console handler stays too, for local interactive runs.
+    #
+    # One log file PER ACCOUNT: the demo and live engines are separate processes
+    # on the same box, and RotatingFileHandler is not safe across processes -
+    # sharing one file would interleave writes and corrupt on rotation.
     log_dir = Path(__file__).resolve().parent.parent / "logs"
     log_dir.mkdir(exist_ok=True)
     logging.basicConfig(
@@ -57,13 +63,14 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
         handlers=[
             logging.handlers.RotatingFileHandler(
-                log_dir / "engine.log", maxBytes=10_000_000, backupCount=5, encoding="utf-8"
+                log_dir / f"engine-{settings.account_key}.log",
+                maxBytes=10_000_000,
+                backupCount=5,
+                encoding="utf-8",
             ),
             logging.StreamHandler(),
         ],
     )
-
-    settings = Settings()
     engine = build_engine(settings=settings)
     supabase = SupabaseClient(settings)
 

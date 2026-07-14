@@ -81,7 +81,7 @@ live - all one paste.
 
 ### 5. Verify end-to-end
 
-- Confirm `logs\engine.log` showed a clean connect + first heartbeat (the
+- Confirm `logs\engine-icmarkets-demo.log` showed a clean connect + first heartbeat (the
   previous script's tail should already show this).
 - Check the dashboard - the Engine tile should flip to LIVE within ~60s.
 - Reboot the VPS (`Restart-Computer`) once, wait a few minutes, and confirm
@@ -89,7 +89,43 @@ live - all one paste.
   Task Scheduler are wired correctly) - this is the actual test of "survives
   a reboot," not just reading the config.
 
-### 6. Stop the local engine
+### 6. (Optional) Add the LIVE account's second engine
+
+Only when you want the live half running. It is safe to do now: the live engine
+connects, heartbeats and reports, and **places no orders** - four independent
+guards block execution until risk-based position sizing exists (see
+`infra/run-live-engine.ps1`'s header and `docs/safety-rails.md`). Running it
+early is how you prove the plumbing works before any money is at stake.
+
+The model is: **two terminals, two engines, two accounts, two log files, one
+repo.** MT5's Python bridge attaches to one terminal per process, so the live
+account needs its own terminal installation - it cannot share the demo one.
+
+1. Install a **second** MT5 terminal to its own directory (the IC Markets
+   installer lets you choose the path, e.g.
+   `C:\Program Files\MetaTrader 5 IC Markets Live`). Log it into your **real**
+   account and enable Algo Trading.
+2. Put a shortcut to that second `terminal64.exe` in `shell:startup` too, so it
+   returns after a reboot like the demo terminal does.
+3. Register the second task (adjust `-TerminalPath` if you installed elsewhere):
+
+```powershell
+cd C:\ForexAI
+.\infra\setup-live-engine-task.ps1 -TerminalPath "C:\Program Files\MetaTrader 5 IC Markets Live\terminal64.exe"
+Start-ScheduledTask -TaskName "ForexAI-Engine-Live"
+Get-Content C:\ForexAI\logs\engine-icmarkets-live.log -Tail 20
+```
+
+No `.env` edit is needed: `infra/run-live-engine.ps1` sets `ACCOUNT_KEY`,
+`TEST_MODE=false`, `MT5_TERMINAL_PATH` and `DAILY_SUMMARY_ENABLED=false` as
+environment variables, which override `.env` for that process only. Both engines
+therefore run from one checkout with no config duplication.
+
+Expect the log to say the account is blocked - that is the design working, not a
+fault. The dashboard's Accounts section will show the live engine alongside the
+demo one.
+
+### 7. Stop the local engine
 
 Once the VPS engine is confirmed running, **do not also run it locally at the
 same time** - two independent instances evaluating the same strategy against
