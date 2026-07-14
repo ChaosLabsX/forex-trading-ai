@@ -52,7 +52,7 @@ export type Heartbeat = {
   account_key: string;
 };
 
-export type CommandType = "pause" | "resume" | "emergency_close_all";
+export type CommandType = "pause" | "resume" | "emergency_close_all" | "test_trade";
 
 export type Readiness = "not_ready" | "almost_ready" | "ready";
 

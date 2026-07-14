@@ -6,7 +6,15 @@ from datetime import date, datetime, timedelta, timezone
 
 from engine.config import Settings
 from engine.core.interfaces.strategy import StrategyContext
-from engine.core.models import Candle, ClosedTradePnl, NotificationEvent, Position, Timeframe
+from engine.core.models import (
+    Candle,
+    ClosedTradePnl,
+    Direction,
+    NotificationEvent,
+    Position,
+    Signal,
+    Timeframe,
+)
 from engine.evaluator import ReadinessEvaluator
 from engine.gating import StrategyGate
 from engine.registry import EngineComposition
@@ -33,6 +41,13 @@ RECONNECT_BACKOFF_SECONDS = (5, 10, 30, 60)
 # The daily digest only fires inside this window after its scheduled time, so a
 # restart later in the day can't resend it.
 DAILY_SUMMARY_WINDOW_MINUTES = 30
+
+# Manual test trades are tagged with a strategy_name that is NOT in the
+# strategies registry, so the evaluator never sees them - a plumbing test must
+# not contaminate any strategy's track record.
+TEST_TRADE_STRATEGY = "manual_test_trade"
+TEST_TRADE_STOP_PCT = 0.15
+TEST_TRADE_TARGET_PCT = 0.30
 
 
 def _closed_only(candles: list[Candle]) -> list[Candle]:
@@ -376,6 +391,8 @@ class EngineLoop:
                     self._immediate_heartbeat()
                 elif command_type == "emergency_close_all":
                     self._emergency_close_all()
+                elif command_type == "test_trade":
+                    self._place_test_trade(row.get("payload") or {})
                 else:
                     logger.warning("unknown command type: %s", command_type)
             except Exception:
@@ -405,6 +422,68 @@ class EngineLoop:
                 broker.close_position(position.id)
             except Exception:
                 logger.exception("failed to close position %s during emergency close-all", position.id)
+
+    def _place_test_trade(self, payload: dict) -> None:
+        """Fire one real trade on demand, to prove the live path end-to-end.
+
+        Deliberately NOT a strategy: it carries no edge and is never evaluated.
+        It exists so the first real order isn't also the first time this code
+        path runs. It goes through the full risk engine (breakers, sizing, lot
+        clamps, margin), and respects the account-level block - on a live
+        account it is refused unless LIVE_TRADING_ENABLED is on."""
+        broker = self._engine.broker
+        market_data = self._engine.market_data
+        risk_engine = self._engine.risk_engine
+        if broker is None or market_data is None or risk_engine is None:
+            return
+
+        gate = self._gate.gate([s.name for s in self._engine.strategies], force=True)
+        if gate.account_block:
+            logger.warning("test trade refused: %s", gate.account_block)
+            _notify_all(
+                self._engine, "test_trade_refused", f"⛔ Test trade refused: {gate.account_block}"
+            )
+            return
+
+        symbol = str(payload.get("symbol") or INSTRUMENTS[0])
+        direction = Direction.SHORT if str(payload.get("direction", "LONG")).upper() == "SHORT" else Direction.LONG
+        try:
+            tick = market_data.get_latest_tick(symbol)
+            account_state = broker.get_account_state()
+            open_positions = broker.get_open_positions()
+        except Exception:
+            logger.exception("test trade: could not read market/account state")
+            _notify_all(self._engine, "test_trade_refused", "⛔ Test trade failed: see logs")
+            return
+
+        # Stops as a fraction of price keep this symbol-agnostic (a "pip" means
+        # something different on EURUSD vs XAUUSD). The levels only need to be
+        # valid - close it yourself to exercise the close path immediately.
+        entry = tick.ask if direction == Direction.LONG else tick.bid
+        sign = 1.0 if direction == Direction.LONG else -1.0
+        signal = Signal(
+            strategy_name=TEST_TRADE_STRATEGY,
+            symbol=symbol,
+            direction=direction,
+            timeframe=Timeframe.H1,
+            entry_price=entry,
+            stop_loss=entry * (1 - sign * TEST_TRADE_STOP_PCT / 100),
+            take_profit=entry * (1 + sign * TEST_TRADE_TARGET_PCT / 100),
+            reason="manual test trade from the dashboard - not a strategy signal",
+        )
+
+        decision = risk_engine.validate_signal(
+            signal, account_state, open_positions, broker, risk_pct=payload.get("risk_pct")
+        )
+        if not decision.approved or decision.order is None:
+            logger.warning("test trade rejected by risk engine: %s", decision.reason)
+            _notify_all(
+                self._engine, "test_trade_refused", f"⛔ Test trade rejected: {decision.reason}"
+            )
+            return
+
+        logger.info("TEST TRADE approved: %s", decision.reason)
+        self._open_trade(TEST_TRADE_STRATEGY, decision.order)
 
     def _manage_open_positions(self) -> None:
         """Per-cycle breakeven/trailing-stop management. Purely protective (it
