@@ -10,26 +10,16 @@ type Props = {
    * happened to default to it. */
   accountKey: string;
   accountLabel: string;
-  isLive: boolean;
 };
 
-export function Controls({ session, accountKey, accountLabel, isLive }: Props) {
+export function Controls({ session, accountKey, accountLabel }: Props) {
   const [pending, setPending] = useState<CommandType | null>(null);
   const [message, setMessage] = useState<string | null>(null);
 
-  async function sendCommand(commandType: CommandType, payload?: Record<string, unknown>) {
+  async function sendCommand(commandType: CommandType) {
     if (commandType === "emergency_close_all") {
       const confirmed = window.confirm(
         `This will immediately close every open position on ${accountLabel}. Are you sure?`
-      );
-      if (!confirmed) return;
-    }
-    if (commandType === "test_trade") {
-      const confirmed = window.confirm(
-        isLive
-          ? `This places a REAL order with REAL money on ${accountLabel}, sized by your risk settings. ` +
-            `It is a plumbing test, not a strategy - it has no edge and is as likely to lose as win. Continue?`
-          : `Place a test trade on ${accountLabel} to verify the trade pipeline?`
       );
       if (!confirmed) return;
     }
@@ -40,7 +30,6 @@ export function Controls({ session, accountKey, accountLabel, isLive }: Props) {
       command_type: commandType,
       created_by: session.user.id,
       account_key: accountKey,
-      payload: payload ?? null,
     });
     setPending(null);
     setMessage(
@@ -58,14 +47,6 @@ export function Controls({ session, accountKey, accountLabel, isLive }: Props) {
         </button>
         <button className="btn" disabled={pending !== null} onClick={() => sendCommand("resume")}>
           Resume trading
-        </button>
-        <button
-          className="btn"
-          disabled={pending !== null}
-          onClick={() => sendCommand("test_trade", { symbol: "EURUSD", direction: "LONG" })}
-          title="Places one real order to verify sizing, execution, Telegram and close/reconciliation end-to-end"
-        >
-          Place test trade
         </button>
         <span className="grow" />
         <button

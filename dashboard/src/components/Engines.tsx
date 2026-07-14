@@ -65,7 +65,6 @@ export function Engines({ session, health }: Props) {
                     session={session}
                     accountKey={h.account.key}
                     accountLabel={h.account.label}
-                    isLive={isLive}
                   />
                 </div>
               ) : (

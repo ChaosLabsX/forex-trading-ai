@@ -65,14 +65,33 @@ export function StrategyLab() {
   }
 
   const readyCount = active.filter((s) => s.readiness === "ready").length;
+  const almostCount = active.filter((s) => s.readiness === "almost_ready").length;
+  const notReadyCount = active.filter((s) => s.readiness === "not_ready").length;
 
   return (
     <section className="section">
       <div className="section-head">
         <h2 className="section-title">Strategy laboratory</h2>
-        <span className="section-note">
-          {active.length} active · {readyCount} ready · ranked by proven edge
-        </span>
+        <span className="section-note">ranked by proven edge</span>
+      </div>
+
+      <div className="lab-summary">
+        <div className="lab-stat">
+          <strong>{active.length}</strong>
+          <span>Total</span>
+        </div>
+        <div className="lab-stat is-ready">
+          <strong>{readyCount}</strong>
+          <span>Ready</span>
+        </div>
+        <div className="lab-stat is-almost">
+          <strong>{almostCount}</strong>
+          <span>Almost ready</span>
+        </div>
+        <div className="lab-stat is-not">
+          <strong>{notReadyCount}</strong>
+          <span>Not ready</span>
+        </div>
       </div>
 
       {liveAccount && readyCount === 0 && (
