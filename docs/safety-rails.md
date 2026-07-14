@@ -171,6 +171,40 @@ properties worth stating explicitly:
   on the table. MT5 continues enforcing whatever stop is set even while the
   engine is down.
 
+## Live trading is blocked at the source (three independent guards)
+
+Real-money position sizing does not exist: `DefaultRiskEngine` implements only
+the `TEST_MODE` fixed micro-lot. The danger this creates is specific - a
+`TEST_MODE=true` engine pointed at a **live** account would happily place real
+0.01-lot orders. Three separate guards prevent that, and all three must be
+deliberately undone to trade live:
+
+1. **`engine/gating.py: LIVE_SIZING_IMPLEMENTED = False`** - blocks every
+   strategy account-wide on any account whose `account_type` is `live`,
+   regardless of readiness, toggles, or overrides.
+2. **`accounts.enabled = false`** on `icmarkets-live` (migration `0010`).
+3. **`strategy_accounts.enabled = false`** for every strategy on the live
+   account - so promoting a strategy to READY never silently starts it live.
+
+Flipping `LIVE_SIZING_IMPLEMENTED` to True without implementing sizing is a
+live-money incident, not a config change.
+
+## Readiness verdicts are statistical, not opinions
+
+`engine/evaluator.py` grades each strategy from its real closed trades. READY
+requires a bootstrap 95% CI on expectancy sitting **entirely above zero** over
+at least `readiness_min_trades_ready` (100) trades, plus profit-factor and
+drawdown vetoes. Verdicts always derive from the **demo** account - grading a
+strategy on the account it was already allowed onto would be circular - and are
+recomputed every `evaluation_interval_minutes`, so a decayed strategy is
+demoted automatically and loses live eligibility without anyone intervening.
+
+R-multiples are the unit throughout, which is why `trades.risk_amount` and
+`trades.initial_stop_loss` are captured at open: trailing-stop management
+rewrites `trades.stop_loss`, so the original risk distance is gone by the time
+a trade closes. Trades without `risk_amount` (anything opened before this) are
+excluded from R statistics rather than guessed at.
+
 ## Known, deliberate gaps (not bugs - documented so they aren't "discovered" again)
 
 - **News blackout is a best-effort filter, not a guarantee.**

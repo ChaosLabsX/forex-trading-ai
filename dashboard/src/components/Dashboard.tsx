@@ -3,6 +3,7 @@ import { useAuth } from "../lib/useAuth";
 import { useDashboardData } from "../lib/useDashboardData";
 import { StatTiles } from "./StatTiles";
 import { PausedBanner } from "./PausedBanner";
+import { StrategyLab } from "./StrategyLab";
 import { Controls } from "./Controls";
 import { OpenTrades } from "./OpenTrades";
 import { TradeHistory } from "./TradeHistory";
@@ -45,6 +46,7 @@ export function Dashboard({ session }: { session: Session }) {
         <>
           {paused && <PausedBanner session={session} />}
           <StatTiles heartbeat={heartbeat} openTrades={openTrades} closedTrades={closedTrades} />
+          <StrategyLab />
           <Controls session={session} />
           <OpenTrades trades={openTrades} />
           <TradeHistory trades={closedTrades} />
