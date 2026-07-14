@@ -546,11 +546,20 @@ class EngineLoop:
 
     def _route_through_risk_engine(self, strategy_name: str, signal, account_state, open_positions) -> tuple:
         risk_engine = self._engine.risk_engine
+        broker = self._engine.broker
         if risk_engine is None:
             return None, "no risk engine configured - signal not traded"
+        if broker is None:
+            return None, "no broker configured - signal not traded"
 
         try:
-            decision = risk_engine.validate_signal(signal, account_state, open_positions)
+            decision = risk_engine.validate_signal(
+                signal,
+                account_state,
+                open_positions,
+                broker,
+                risk_pct=self._gate.risk_pct_for(strategy_name),
+            )
         except Exception:
             logger.exception("risk engine failed validating %s %s", strategy_name, signal.symbol)
             return False, "risk engine raised an exception - see logs"

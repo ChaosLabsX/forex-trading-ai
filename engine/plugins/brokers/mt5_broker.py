@@ -7,6 +7,7 @@ import MetaTrader5 as mt5
 from engine.config import Settings
 from engine.core.interfaces.broker import BrokerAdapter
 from engine.core.models import AccountState, ClosedTradePnl, Direction, Position, PositionStatus
+from engine.sizing import SymbolLimits
 from engine.plugins.brokers.mt5_time import measure_server_utc_offset_seconds, server_epoch_to_utc
 
 _ORDER_TYPE = {
@@ -221,6 +222,24 @@ class MT5BrokerAdapter(BrokerAdapter):
         if not tick_size:
             return None
         return float(info.trade_tick_value / tick_size)
+
+    def get_symbol_limits(self, symbol: str) -> SymbolLimits | None:
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            return None
+        tick_size = info.trade_tick_size or info.point
+        if not tick_size:
+            return None
+        return SymbolLimits(
+            volume_min=float(info.volume_min),
+            volume_max=float(info.volume_max),
+            volume_step=float(info.volume_step),
+            value_per_price_per_lot=float(info.trade_tick_value / tick_size),
+        )
+
+    def calc_margin(self, symbol: str, direction: Direction, lots: float, price: float) -> float | None:
+        margin = mt5.order_calc_margin(_ORDER_TYPE[direction], symbol, lots, price)
+        return float(margin) if margin is not None else None
 
     def get_closed_position_pnl(self, position_id: str) -> float | None:
         breakdown = self.get_closed_position_breakdown(position_id)

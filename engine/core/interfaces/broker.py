@@ -51,6 +51,19 @@ class BrokerAdapter(ABC):
         ...
 
     @abstractmethod
+    def get_symbol_limits(self, symbol: str):
+        """Live contract specs (min/max/step volume + tick value) as a
+        `engine.sizing.SymbolLimits`, or None if the symbol is unknown. Read at
+        runtime, never hardcoded - these are the broker's to change."""
+        ...
+
+    @abstractmethod
+    def calc_margin(self, symbol: str, direction: Direction, lots: float, price: float) -> float | None:
+        """Margin the broker would require for this order, or None if it can't
+        be calculated. Used to refuse trades that would over-commit the account."""
+        ...
+
+    @abstractmethod
     def get_price_value_per_lot(self, symbol: str) -> float | None:
         """Account-currency value of a 1.0 price move for 1.0 lot, or None if the
         symbol is unknown. Lets the engine record what a trade actually risked

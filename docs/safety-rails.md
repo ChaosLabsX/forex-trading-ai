@@ -171,23 +171,30 @@ properties worth stating explicitly:
   on the table. MT5 continues enforcing whatever stop is set even while the
   engine is down.
 
-## Live trading is blocked at the source (three independent guards)
+## Live trading is off behind four independent guards
 
-Real-money position sizing does not exist: `DefaultRiskEngine` implements only
-the `TEST_MODE` fixed micro-lot. The danger this creates is specific - a
-`TEST_MODE=true` engine pointed at a **live** account would happily place real
-0.01-lot orders. Three separate guards prevent that, and all three must be
-deliberately undone to trade live:
+Risk-based position sizing **is implemented and tested** (`engine/sizing.py`);
+live trading is off because no strategy has earned it, not because anything is
+missing. Full procedure in [`going-live.md`](going-live.md). The guards:
 
-1. **`engine/gating.py: LIVE_SIZING_IMPLEMENTED = False`** - blocks every
-   strategy account-wide on any account whose `account_type` is `live`,
-   regardless of readiness, toggles, or overrides.
+1. **`Settings.live_trading_enabled` (`LIVE_TRADING_ENABLED`, default false)** -
+   `engine/gating.py` blocks every strategy account-wide on a live account while
+   it is off.
 2. **`accounts.enabled = false`** on `icmarkets-live` (migration `0010`).
-3. **`strategy_accounts.enabled = false`** for every strategy on the live
-   account - so promoting a strategy to READY never silently starts it live.
+3. **`strategy_accounts.enabled = false`** for every strategy on live - so
+   promoting a strategy to READY never silently starts it live.
+4. **`strategies.readiness == 'ready'`** is required on live, and only
+   `engine/evaluator.py` ever grants it.
 
-Flipping `LIVE_SIZING_IMPLEMENTED` to True without implementing sizing is a
-live-money incident, not a config change.
+**An earlier version made guard 1 mean "sizing isn't implemented yet". That was
+a trap**: a safety property derived from a feature being missing evaporates the
+instant the feature lands - implementing sizing would have silently disarmed it.
+The guard is now an explicit switch that says nothing about what is built.
+
+**`TEST_MODE` is not a guard.** It selects sizing *style*: `true` = the demo
+lab's fixed 0.01 micro lot, `false` = real risk-based sizing. On a live account
+`TEST_MODE=true` is the *dangerous* setting - it would place real micro-lot
+orders sized for a demo.
 
 ## Readiness verdicts are statistical, not opinions
 

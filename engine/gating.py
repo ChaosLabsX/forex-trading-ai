@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from engine.config import Settings
 from engine.supabase_client import SupabaseClient
@@ -26,12 +26,11 @@ logger = logging.getLogger("engine.gating")
 
 CACHE_TTL_SECONDS = 30  # dashboard toggles land within this; not per-2s-tick load
 
-# Real-money position sizing does not exist yet: DefaultRiskEngine implements
-# only the TEST_MODE fixed micro-lot and refuses everything else. A micro-lot
-# that "works on demo" must never be pointed at a real account by accident, so
-# live execution is blocked at the source until sizing is built and tested.
-# Flipping this to True without implementing sizing is a live-money incident.
-LIVE_SIZING_IMPLEMENTED = False
+# NOTE: the old LIVE_SIZING_IMPLEMENTED constant is gone on purpose. It made
+# safety a side effect of sizing being unbuilt, which silently evaporates the
+# moment sizing lands. The guard is now Settings.live_trading_enabled: an
+# explicit switch, off by default, that says nothing about what is or isn't
+# implemented. See docs/going-live.md.
 
 
 @dataclass(frozen=True)
@@ -51,6 +50,8 @@ class Gate:
     eligible: frozenset[str]
     blocked: dict[str, str]  # strategy name -> plain-English reason
     account_block: str | None  # non-None means nothing trades on this account
+    # strategy -> per-(strategy, account) risk override; absent = use the default
+    risk_pct: dict[str, float | None] = field(default_factory=dict)
 
 
 class StrategyGate:
@@ -146,10 +147,10 @@ class StrategyGate:
             )
         if not account.enabled:
             return self._all_blocked(known, f"account '{account.key}' is disabled")
-        if account.is_live and not LIVE_SIZING_IMPLEMENTED:
+        if account.is_live and not self._settings.live_trading_enabled:
             return self._all_blocked(
                 known,
-                "live trading is blocked: risk-based position sizing is not implemented yet",
+                "live trading is disabled (LIVE_TRADING_ENABLED is off) - no real order can be placed",
             )
 
         try:
@@ -166,9 +167,12 @@ class StrategyGate:
 
         eligible: set[str] = set()
         blocked: dict[str, str] = {}
+        risk_pct: dict[str, float | None] = {}
         for name in known:
             strategy = strategies.get(name)
             pair = pairs.get(name)
+            if pair is not None:
+                risk_pct[name] = pair.get("risk_pct")
             if strategy is None:
                 blocked[name] = "not registered in the strategies table"
             elif strategy.get("retired"):
@@ -184,8 +188,14 @@ class StrategyGate:
                 )
             else:
                 eligible.add(name)
-        return Gate(frozenset(eligible), blocked, None)
+        return Gate(frozenset(eligible), blocked, None, risk_pct)
+
+    def risk_pct_for(self, strategy_name: str) -> float | None:
+        """Per-(strategy, account) risk override, or None to use the default."""
+        if self._cache is None:
+            return None
+        return self._cache.risk_pct.get(strategy_name)
 
     @staticmethod
     def _all_blocked(known: list[str], reason: str) -> Gate:
-        return Gate(frozenset(), {name: reason for name in known}, reason)
+        return Gate(frozenset(), {name: reason for name in known}, reason, {})
