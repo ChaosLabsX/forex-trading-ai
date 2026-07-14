@@ -18,6 +18,7 @@ export type Signal = {
   risk_approved: boolean | null;
   risk_reason: string | null;
   created_at: string;
+  account_key: string;
   ai_reviews: AIReview[];
 };
 
