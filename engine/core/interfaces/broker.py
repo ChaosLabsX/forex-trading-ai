@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
-from engine.core.models import AccountState, Direction, Position
+from engine.core.models import AccountState, ClosedTradePnl, Direction, Position
 
 
 class BrokerAdapter(ABC):
@@ -46,6 +46,13 @@ class BrokerAdapter(ABC):
 
     @abstractmethod
     def get_closed_position_pnl(self, position_id: str) -> float | None:
-        """Realized P&L for a position that has already closed (however it
-        closed - stop, target, or manual), or None if no record is found."""
+        """Net realized P&L (gross + commission + swap) for a position that has
+        already closed, or None if no record is found."""
+        ...
+
+    @abstractmethod
+    def get_closed_position_breakdown(self, position_id: str) -> ClosedTradePnl | None:
+        """Realized result split into gross profit / commission / swap, or None
+        if no record is found. Lets a win be reported before fees and a loss
+        all-in."""
         ...

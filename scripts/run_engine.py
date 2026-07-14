@@ -38,6 +38,15 @@ def main() -> None:
 
     truststore.inject_into_ssl()
 
+    # Make console logging tolerant of non-ASCII (emoji in trade alerts) so a
+    # legacy code-page console can never turn a notification into an encoding
+    # error. The rotating file handler is already UTF-8.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
     # File handler is what makes this work under Task Scheduler, which
     # doesn't capture stdout/stderr the way a manually-redirected console
     # process does - console handler stays too, for local interactive runs.

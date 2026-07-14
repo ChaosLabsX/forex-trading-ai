@@ -6,7 +6,7 @@ import MetaTrader5 as mt5
 
 from engine.config import Settings
 from engine.core.interfaces.broker import BrokerAdapter
-from engine.core.models import AccountState, Direction, Position, PositionStatus
+from engine.core.models import AccountState, ClosedTradePnl, Direction, Position, PositionStatus
 from engine.plugins.brokers.mt5_time import measure_server_utc_offset_seconds, server_epoch_to_utc
 
 _ORDER_TYPE = {
@@ -214,13 +214,24 @@ class MT5BrokerAdapter(BrokerAdapter):
         )
 
     def get_closed_position_pnl(self, position_id: str) -> float | None:
+        breakdown = self.get_closed_position_breakdown(position_id)
+        return breakdown.net if breakdown is not None else None
+
+    def get_closed_position_breakdown(self, position_id: str) -> ClosedTradePnl | None:
         deals = mt5.history_deals_get(position=int(position_id))
         if not deals:
             return None
-        closing_deals = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT]
-        if not closing_deals:
+        # Require a closing deal so we don't report on a still-open position.
+        if not any(d.entry == mt5.DEAL_ENTRY_OUT for d in deals):
             return None
-        return float(sum(d.profit + d.swap + d.commission for d in closing_deals))
+        # Sum across ALL deals, not just the closing one: profit lands on the
+        # exit deal, but commission is charged on entry AND exit, so a
+        # closing-deal-only sum understates fees.
+        return ClosedTradePnl(
+            gross_profit=float(sum(d.profit for d in deals)),
+            commission=float(sum(d.commission for d in deals)),
+            swap=float(sum(d.swap for d in deals)),
+        )
 
     def _to_position(self, raw) -> Position:
         return Position(

@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timezone
 
 from engine.core.interfaces.strategy import StrategyContext
-from engine.core.models import Candle, NotificationEvent, Position, Timeframe
+from engine.core.models import Candle, ClosedTradePnl, NotificationEvent, Position, Timeframe
 from engine.registry import EngineComposition
 from engine.supabase_client import SupabaseClient
 
@@ -41,6 +41,35 @@ def _notify_all(engine: EngineComposition, event_type: str, message: str) -> Non
             notifier.notify(NotificationEvent(event_type=event_type, message=message))
         except Exception:
             logger.exception("notification provider failed")
+
+
+def _money(value: float) -> str:
+    # e.g. +$1.50 / -$2.10 - sign before the currency symbol, USD account
+    sign = "-" if value < 0 else "+"
+    return f"{sign}${abs(value):,.2f}"
+
+
+def _format_close_message(symbol: str, direction, breakdown: ClosedTradePnl | None) -> str:
+    """A win is shown as gross profit before fees; a loss is shown all-in
+    (fees included), per how the account actually moved. Win/loss is decided by
+    the net result. Works the same on demo or a real account."""
+    dir_txt = f" {direction}" if direction else ""
+    if breakdown is None:
+        return f"CLOSED  {symbol}{dir_txt} - result unavailable (no deal history found)"
+
+    if breakdown.net >= 0:
+        lines = [
+            f"✅ WIN  {symbol}{dir_txt}",
+            f"Profit: {_money(breakdown.gross_profit)}  (before fees)",
+        ]
+        if abs(breakdown.fees) >= 0.005:
+            lines.append(f"Fees: {_money(breakdown.fees)}")
+    else:
+        lines = [
+            f"\U0001F534 LOSS  {symbol}{dir_txt}",
+            f"Loss: {_money(breakdown.net)}  (incl. fees)",
+        ]
+    return "\n".join(lines)
 
 
 def _candle_row(candle) -> dict:
@@ -487,12 +516,13 @@ class EngineLoop:
             "TRADE OPENED: %s %s %s %s lot @ %s",
             strategy_name, position.symbol, position.direction.value, position.lot_size, position.entry_price,
         )
-        _notify_all(
-            self._engine,
-            "trade_opened",
-            f"{strategy_name} {position.symbol} {position.direction.value} "
+        lines = [
+            f"\U0001F535 OPENED  {position.symbol} {position.direction.value}",
             f"{position.lot_size} lot @ {position.entry_price}",
-        )
+        ]
+        if position.stop_loss is not None and position.take_profit is not None:
+            lines.append(f"SL {position.stop_loss}  ·  TP {position.take_profit}")
+        _notify_all(self._engine, "trade_opened", "\n".join(lines))
 
     def _reconcile_closed_trades(self, open_positions: list) -> None:
         broker = self._engine.broker
@@ -512,18 +542,19 @@ class EngineLoop:
                 continue  # still open
 
             try:
-                pnl = broker.get_closed_position_pnl(ticket)
+                breakdown = broker.get_closed_position_breakdown(ticket)
             except Exception:
                 logger.exception("failed to fetch closed P&L for ticket %s", ticket)
-                pnl = None
+                breakdown = None
 
+            net = breakdown.net if breakdown is not None else None
             try:
                 self._supabase.update(
                     "trades",
                     {"mt5_ticket": f"eq.{ticket}"},
                     {
                         "status": "CLOSED",
-                        "realized_pnl": pnl,
+                        "realized_pnl": net,
                         "closed_at": datetime.now(timezone.utc).isoformat(),
                     },
                 )
@@ -531,12 +562,14 @@ class EngineLoop:
                 logger.exception("failed to persist closed trade %s", ticket)
                 continue
 
-            pnl_text = f"{pnl:+.2f}" if pnl is not None else "unknown"
-            logger.info("TRADE CLOSED: %s %s ticket=%s pnl=%s", row["strategy_name"], row["symbol"], ticket, pnl_text)
+            net_text = f"{net:+.2f}" if net is not None else "unknown"
+            logger.info(
+                "TRADE CLOSED: %s %s ticket=%s net=%s", row["strategy_name"], row["symbol"], ticket, net_text
+            )
             _notify_all(
                 self._engine,
                 "trade_closed",
-                f"{row['strategy_name']} {row['symbol']} closed, P&L: {pnl_text}",
+                _format_close_message(row["symbol"], row.get("direction"), breakdown),
             )
 
     def _log_signal(

@@ -119,3 +119,22 @@ class AIVerdict:
     approved: bool
     confidence: float
     rationale: str
+
+
+@dataclass(frozen=True)
+class ClosedTradePnl:
+    """Realized result of a closed position, split so a win can be shown before
+    fees and a loss shown all-in. Commission/swap are the broker's own signed
+    values (commission is normally negative; swap can be either)."""
+
+    gross_profit: float  # market P&L only, before any costs
+    commission: float
+    swap: float
+
+    @property
+    def fees(self) -> float:
+        return self.commission + self.swap
+
+    @property
+    def net(self) -> float:
+        return self.gross_profit + self.commission + self.swap
