@@ -137,14 +137,25 @@ class EngineLoop:
             time.sleep(wait)
 
     def _send_heartbeat(self) -> None:
+        # status carries the pause state so the dashboard can show PAUSED vs
+        # LIVE - the engine keeps heartbeating and monitoring while paused, it
+        # just won't open new trades (see _evaluate_strategies).
+        status = "paused" if self._paused else "running"
         try:
             self._supabase.insert(
                 "engine_heartbeats",
-                [{"status": "running", "broker_connected": self._connected, "detail": None}],
+                [{"status": status, "broker_connected": self._connected, "detail": None}],
             )
-            logger.info("heartbeat sent")
+            logger.info("heartbeat sent (%s)", status)
         except Exception:
             logger.exception("failed to send heartbeat to Supabase")
+
+    def _immediate_heartbeat(self) -> None:
+        # Push the current state right away (e.g. just after a pause/resume) so
+        # the dashboard reflects it within its poll interval instead of waiting
+        # up to a full HEARTBEAT_INTERVAL_SECONDS for the next scheduled one.
+        self._send_heartbeat()
+        self._last_heartbeat = time.monotonic()
 
     def _refresh_market_data_and_evaluate(self) -> None:
         market_data = self._engine.market_data
@@ -208,10 +219,12 @@ class EngineLoop:
                     self._paused = True
                     logger.info("PAUSED via dashboard command")
                     _notify_all(self._engine, "paused", "Trading paused via dashboard command.")
+                    self._immediate_heartbeat()
                 elif command_type == "resume":
                     self._paused = False
                     logger.info("RESUMED via dashboard command")
                     _notify_all(self._engine, "resumed", "Trading resumed via dashboard command.")
+                    self._immediate_heartbeat()
                 elif command_type == "emergency_close_all":
                     self._emergency_close_all()
                 else:

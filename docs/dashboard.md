@@ -16,8 +16,9 @@ src/
     format.ts             date/money/relative-time formatting helpers
   components/
     Login.tsx            the full-page gate - the only thing a signed-out visitor sees
-    Dashboard.tsx        signed-in layout: topbar, stat tiles, sections, account settings
-    StatTiles.tsx        KPI row: engine LIVE/OFFLINE, open trades, total P&L, win rate
+    Dashboard.tsx        signed-in layout: topbar, paused banner, stat tiles, sections, account settings
+    StatTiles.tsx        KPI row: engine LIVE/PAUSED/OFFLINE, open trades, total P&L, win rate
+    PausedBanner.tsx     loud full-width alert + one-click resume, shown only while paused
     Controls.tsx         pause/resume/emergency-close-all
     OpenTrades.tsx       trades where status=OPEN
     TradeHistory.tsx     trades where status=CLOSED

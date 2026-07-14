@@ -30,6 +30,10 @@ export function StatTiles({ heartbeat, openTrades, closedTrades }: Props) {
     engineLabel = "OFFLINE";
     engineDot = "dot-crit";
     engineSub = `Last heartbeat ${fmtAgo(heartbeat.created_at)}`;
+  } else if (heartbeat.status === "paused") {
+    engineLabel = "PAUSED";
+    engineDot = "dot-warn";
+    engineSub = "Not opening new trades";
   } else if (!heartbeat.broker_connected) {
     engineLabel = "LIVE";
     engineDot = "dot-warn";
