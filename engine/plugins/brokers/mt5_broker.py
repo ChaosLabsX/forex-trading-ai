@@ -213,6 +213,15 @@ class MT5BrokerAdapter(BrokerAdapter):
             realized_pnl=result.profit if hasattr(result, "profit") else None,
         )
 
+    def get_price_value_per_lot(self, symbol: str) -> float | None:
+        info = mt5.symbol_info(symbol)
+        if info is None:
+            return None
+        tick_size = info.trade_tick_size or info.point
+        if not tick_size:
+            return None
+        return float(info.trade_tick_value / tick_size)
+
     def get_closed_position_pnl(self, position_id: str) -> float | None:
         breakdown = self.get_closed_position_breakdown(position_id)
         return breakdown.net if breakdown is not None else None

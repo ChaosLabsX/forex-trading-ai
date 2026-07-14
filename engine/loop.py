@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
+from engine.config import Settings
 from engine.core.interfaces.strategy import StrategyContext
 from engine.core.models import Candle, ClosedTradePnl, NotificationEvent, Position, Timeframe
+from engine.evaluator import ReadinessEvaluator
+from engine.gating import StrategyGate
 from engine.registry import EngineComposition
+from engine.reporting import build_daily_summary, format_readiness_change, parse_daily_time
 from engine.supabase_client import SupabaseClient
 
 logger = logging.getLogger("engine.loop")
@@ -26,6 +30,9 @@ CANDLE_REFRESH_INTERVAL_SECONDS = 60
 # a modify only matters when price has meaningfully advanced).
 MANAGE_INTERVAL_SECONDS = 5
 RECONNECT_BACKOFF_SECONDS = (5, 10, 30, 60)
+# The daily digest only fires inside this window after its scheduled time, so a
+# restart later in the day can't resend it.
+DAILY_SUMMARY_WINDOW_MINUTES = 30
 
 
 def _closed_only(candles: list[Candle]) -> list[Candle]:
@@ -49,24 +56,30 @@ def _money(value: float) -> str:
     return f"{sign}${abs(value):,.2f}"
 
 
-def _format_close_message(symbol: str, direction, breakdown: ClosedTradePnl | None) -> str:
+def _format_close_message(
+    symbol: str, direction, breakdown: ClosedTradePnl | None, account: str = "", strategy: str = ""
+) -> str:
     """A win is shown as gross profit before fees; a loss is shown all-in
     (fees included), per how the account actually moved. Win/loss is decided by
     the net result. Works the same on demo or a real account."""
     dir_txt = f" {direction}" if direction else ""
+    tag = "  ·  ".join(x for x in (account, strategy) if x)
+    suffix = f"  ·  {tag}" if tag else ""
     if breakdown is None:
-        return f"CLOSED  {symbol}{dir_txt} - result unavailable (no deal history found)"
+        return f"CLOSED{suffix}\n{symbol}{dir_txt} - result unavailable (no deal history found)"
 
     if breakdown.net >= 0:
         lines = [
-            f"✅ WIN  {symbol}{dir_txt}",
+            f"✅ WIN{suffix}",
+            f"{symbol}{dir_txt}",
             f"Profit: {_money(breakdown.gross_profit)}  (before fees)",
         ]
         if abs(breakdown.fees) >= 0.005:
             lines.append(f"Fees: {_money(breakdown.fees)}")
     else:
         lines = [
-            f"\U0001F534 LOSS  {symbol}{dir_txt}",
+            f"\U0001F534 LOSS{suffix}",
+            f"{symbol}{dir_txt}",
             f"Loss: {_money(breakdown.net)}  (incl. fees)",
         ]
     return "\n".join(lines)
@@ -89,21 +102,64 @@ class EngineLoop:
     """Connection management, data persistence, strategy evaluation, and (as of
     Phase 3) risk-checked order execution with trade lifecycle tracking."""
 
-    def __init__(self, engine: EngineComposition, supabase: SupabaseClient) -> None:
+    def __init__(
+        self, engine: EngineComposition, supabase: SupabaseClient, settings: Settings | None = None
+    ) -> None:
         self._engine = engine
         self._supabase = supabase
+        self._settings = settings or Settings()
+        self._account_key = self._settings.account_key
+        self._gate = StrategyGate(supabase, self._settings)
+        self._evaluator = ReadinessEvaluator(supabase, self._settings)
         self._connected = False
         self._backoff_index = 0
         self._last_heartbeat = 0.0
         self._last_candle_refresh = 0.0
         self._last_manage = 0.0
+        self._last_evaluation = 0.0
+        self._last_summary_date: date | None = None
         # (strategy_name, symbol) -> timestamp of the last *closed* entry-timeframe
         # bar we evaluated, so we log each closed bar's outcome exactly once
         self._last_evaluated_bar: dict[tuple[str, str], datetime] = {}
+        # strategy -> last logged block reason, so a permanent block (e.g. live
+        # sizing missing) is reported once rather than every single cycle
+        self._logged_blocks: dict[str, str] = {}
         self._paused = False
 
+    # ------------------------------------------------------------- identity
+
+    def _account(self):
+        return self._gate.account()
+
+    def _account_label(self) -> str:
+        account = self._account()
+        return account.account_type.upper() if account else self._account_key
+
+    def _is_lab(self) -> bool:
+        """The demo account is the laboratory: it owns readiness verdicts."""
+        account = self._account()
+        return account is not None and account.account_type == "demo"
+
     def run_forever(self) -> None:
-        _notify_all(self._engine, "startup", "Engine loop starting.")
+        known = [s.name for s in self._engine.strategies]
+        self._gate.sync_strategies(known)
+        account = self._account()
+        if account is None:
+            logger.error(
+                "account '%s' is not registered - nothing will trade until it is", self._account_key
+            )
+        else:
+            logger.info("engine account: %s (%s)", account.key, account.account_type)
+        gate = self._gate.gate(known, force=True)
+        if gate.account_block:
+            logger.warning("ACCOUNT BLOCKED: %s", gate.account_block)
+
+        _notify_all(
+            self._engine,
+            "startup",
+            f"Engine loop starting  ·  {self._account_label()}  ·  account {self._account_key}"
+            + (f"\n⛔ {gate.account_block}" if gate.account_block else ""),
+        )
         try:
             while True:
                 self._tick()
@@ -132,6 +188,54 @@ class EngineLoop:
         if self._connected and now - self._last_manage >= MANAGE_INTERVAL_SECONDS:
             self._manage_open_positions()
             self._last_manage = now
+        # Evaluation and the digest read only Supabase, so they keep working
+        # (and keep reporting) even while the broker is down.
+        if now - self._last_evaluation >= self._settings.evaluation_interval_minutes * 60:
+            self._run_evaluation()
+            self._last_evaluation = now
+        self._maybe_send_daily_summary()
+
+    # ---------------------------------------------------- strategy lifecycle
+
+    def _run_evaluation(self) -> None:
+        if not self._is_lab():
+            return  # only the lab judges readiness
+        try:
+            self._evaluator.run(on_change=self._on_readiness_change)
+        except Exception:
+            logger.exception("readiness evaluation failed")
+
+    def _on_readiness_change(self, strategy: dict, previous, evaluation) -> None:
+        _notify_all(
+            self._engine, "readiness_changed", format_readiness_change(strategy, previous, evaluation)
+        )
+        self._gate.gate([s.name for s in self._engine.strategies], force=True)
+
+    def _maybe_send_daily_summary(self) -> None:
+        if not self._settings.daily_summary_enabled:
+            return
+        target = parse_daily_time(self._settings.daily_summary_utc_time)
+        if target is None:
+            return
+        now = datetime.now(timezone.utc)
+        if self._last_summary_date == now.date():
+            return
+        scheduled = datetime.combine(now.date(), target)
+        # Only fire inside a short window after the target: a restart hours
+        # later must not resend the digest.
+        if not (scheduled <= now < scheduled + timedelta(minutes=DAILY_SUMMARY_WINDOW_MINUTES)):
+            return
+        self._last_summary_date = now.date()
+        try:
+            gate = self._gate.gate([s.name for s in self._engine.strategies])
+            _notify_all(
+                self._engine,
+                "daily_summary",
+                build_daily_summary(self._supabase, gate.account_block, now),
+            )
+            logger.info("daily summary sent")
+        except Exception:
+            logger.exception("failed to build/send daily summary")
 
     def _ensure_connected(self) -> None:
         broker = self._engine.broker
@@ -173,7 +277,14 @@ class EngineLoop:
         try:
             self._supabase.insert(
                 "engine_heartbeats",
-                [{"status": status, "broker_connected": self._connected, "detail": None}],
+                [
+                    {
+                        "status": status,
+                        "broker_connected": self._connected,
+                        "detail": None,
+                        "account_key": self._account_key,
+                    }
+                ],
             )
             logger.info("heartbeat sent (%s)", status)
         except Exception:
@@ -235,7 +346,16 @@ class EngineLoop:
 
     def _process_commands(self) -> None:
         try:
-            pending = self._supabase.select("commands", {"status": "eq.pending", "order": "created_at.asc"})
+            # Only this account's commands - with two engines running, each must
+            # ignore the other's pause/close instructions.
+            pending = self._supabase.select(
+                "commands",
+                {
+                    "status": "eq.pending",
+                    "account_key": f"eq.{self._account_key}",
+                    "order": "created_at.asc",
+                },
+            )
         except Exception:
             logger.exception("failed to fetch pending commands")
             return
@@ -339,9 +459,15 @@ class EngineLoop:
     ) -> None:
         if self._paused:
             return
+        gate = self._gate.gate([s.name for s in self._engine.strategies])
         for strategy in self._engine.strategies:
             if symbol not in strategy.instruments:
                 continue
+            if strategy.name not in gate.eligible:
+                # No fallback: if the registry doesn't clear it, it doesn't trade.
+                self._log_block_once(strategy.name, gate.blocked.get(strategy.name, "not eligible"))
+                continue
+            self._logged_blocks.pop(strategy.name, None)
             if not all(tf in candles_by_timeframe and candles_by_timeframe[tf] for tf in strategy.required_timeframes):
                 continue
 
@@ -490,7 +616,31 @@ class EngineLoop:
                 return position
         return None
 
+    def _risk_amount(self, position) -> float | None:
+        """Account-currency amount this trade puts at risk if its initial stop
+        is hit. Recorded at open because trailing later rewrites stop_loss - and
+        without it, R-multiples (and therefore every readiness verdict) become
+        uncomputable for this trade forever."""
+        broker = self._engine.broker
+        if broker is None or position.stop_loss is None:
+            return None
+        try:
+            value_per_price = broker.get_price_value_per_lot(position.symbol)
+        except Exception:
+            logger.exception("failed to read tick value for %s", position.symbol)
+            return None
+        if not value_per_price:
+            return None
+        distance = abs(position.entry_price - position.stop_loss)
+        return distance * value_per_price * position.lot_size
+
     def _persist_opened_trade(self, strategy_name: str, position) -> None:
+        risk_amount = self._risk_amount(position)
+        if risk_amount is None:
+            logger.warning(
+                "no risk_amount for trade %s - it will be excluded from R-based evaluation",
+                position.id,
+            )
         try:
             self._supabase.insert(
                 "trades",
@@ -503,9 +653,12 @@ class EngineLoop:
                         "lot_size": position.lot_size,
                         "entry_price": position.entry_price,
                         "stop_loss": position.stop_loss,
+                        "initial_stop_loss": position.stop_loss,
+                        "risk_amount": risk_amount,
                         "take_profit": position.take_profit,
                         "status": "OPEN",
                         "opened_at": position.opened_at.isoformat(),
+                        "account_key": self._account_key,
                     }
                 ],
             )
@@ -517,11 +670,14 @@ class EngineLoop:
             strategy_name, position.symbol, position.direction.value, position.lot_size, position.entry_price,
         )
         lines = [
-            f"\U0001F535 OPENED  {position.symbol} {position.direction.value}",
+            f"\U0001F535 OPENED  ·  {self._account_label()}  ·  {strategy_name}",
+            f"{position.symbol} {position.direction.value}",
             f"{position.lot_size} lot @ {position.entry_price}",
         ]
         if position.stop_loss is not None and position.take_profit is not None:
             lines.append(f"SL {position.stop_loss}  ·  TP {position.take_profit}")
+        if risk_amount:
+            lines.append(f"Risk: {_money(-risk_amount)} if stopped")
         _notify_all(self._engine, "trade_opened", "\n".join(lines))
 
     def _reconcile_closed_trades(self, open_positions: list) -> None:
@@ -569,8 +725,20 @@ class EngineLoop:
             _notify_all(
                 self._engine,
                 "trade_closed",
-                _format_close_message(row["symbol"], row.get("direction"), breakdown),
+                _format_close_message(
+                    row["symbol"],
+                    row.get("direction"),
+                    breakdown,
+                    account=self._account_label(),
+                    strategy=row.get("strategy_name", ""),
+                ),
             )
+
+    def _log_block_once(self, strategy_name: str, reason: str) -> None:
+        if self._logged_blocks.get(strategy_name) == reason:
+            return
+        self._logged_blocks[strategy_name] = reason
+        logger.info("strategy %s not trading on %s: %s", strategy_name, self._account_key, reason)
 
     def _log_signal(
         self, strategy_name: str, symbol: str, evaluation, risk_approved=None, risk_reason=None
@@ -589,6 +757,7 @@ class EngineLoop:
             "metadata": signal.metadata if signal else None,
             "risk_approved": risk_approved,
             "risk_reason": risk_reason,
+            "account_key": self._account_key,
         }
         try:
             inserted = self._supabase.insert("signals", [row], returning=True)

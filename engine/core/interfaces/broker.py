@@ -51,6 +51,13 @@ class BrokerAdapter(ABC):
         ...
 
     @abstractmethod
+    def get_price_value_per_lot(self, symbol: str) -> float | None:
+        """Account-currency value of a 1.0 price move for 1.0 lot, or None if the
+        symbol is unknown. Lets the engine record what a trade actually risked
+        (risk_amount) at open, which is what makes R-multiples computable later."""
+        ...
+
+    @abstractmethod
     def get_closed_position_breakdown(self, position_id: str) -> ClosedTradePnl | None:
         """Realized result split into gross profit / commission / swap, or None
         if no record is found. Lets a win be reported before fees and a loss

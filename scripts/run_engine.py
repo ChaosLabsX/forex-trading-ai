@@ -70,7 +70,7 @@ def main() -> None:
     if engine.broker is None or engine.market_data is None:
         raise SystemExit("broker and market_data must both be configured in config/plugins.yaml")
 
-    EngineLoop(engine, supabase).run_forever()
+    EngineLoop(engine, supabase, settings).run_forever()
 
 
 if __name__ == "__main__":
