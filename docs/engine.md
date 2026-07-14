@@ -61,7 +61,9 @@ the actual number.
 ### Circuit breakers
 
 `RiskEngine.validate_signal()` checks, in order: max concurrent open trades
-(2), consecutive losing trades today (3), and max daily loss % (3%). The last
+(`Settings.max_concurrent_trades`; 12 on the demo lab for data collection, 2 on
+live where it is a real risk control), consecutive losing trades today (3), and
+max daily loss % (3%). The last
 two are computed from **real** MT5 deal history
 (`MT5BrokerAdapter._daily_stats()`), not estimated - this matters, since a
 fake/stale number here would make the safety rail meaningless. See
@@ -83,9 +85,12 @@ designed around; a different strategy is a new file + a config change (see
   within 30 min of a high-impact event in a traded currency, from the free
   ForexFactory calendar (`forexfactory` `NewsProvider`, fails open - see
   [`safety-rails.md`](safety-rails.md)).
-- Configured instruments: `EURUSD`, `GBPUSD`, `USDJPY`, `XAUUSD`.
+- Configured instruments: 16 FX majors/crosses + `XAUUSD` (widened from 4 purely
+  for data rate - the lab needs ~100 trades for a verdict, and 4 symbols yielded
+  only ~19 trades/year). Correlated pairs are NOT independent samples; the
+  bootstrap CI assumes independence and so reads slightly tighter than reality.
 
-Sanity-checked via `scripts/backtest_ema_trend_v1.py`, which replays real
+Sanity-checked via `scripts/backtest.py ema_trend_v1`, which replays real
 historical MT5 candles through the exact same logic and window sizes the live
 loop uses, then simulates each signal forward to see whether the stop or
 target would have hit first. This is a "logic isn't obviously broken" check,

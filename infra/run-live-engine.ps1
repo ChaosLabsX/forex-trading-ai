@@ -41,10 +41,13 @@ if (-not (Test-Path $TerminalPath)) {
     throw "Live MT5 terminal not found at '$TerminalPath'. Install a SECOND MT5 terminal for the live account and pass -TerminalPath, or edit the default in this script."
 }
 
-$env:MT5_TERMINAL_PATH     = $TerminalPath
-$env:ACCOUNT_KEY           = "icmarkets-live"
-$env:TEST_MODE             = "false"   # real sizing, not the demo micro lot - NOT a guard
-$env:DAILY_SUMMARY_ENABLED = "false"   # the demo engine sends one digest covering both accounts
+$env:MT5_TERMINAL_PATH        = $TerminalPath
+$env:ACCOUNT_KEY              = "icmarkets-live"
+$env:TEST_MODE                = "false"   # real sizing, not the demo micro lot - NOT a guard
+$env:DAILY_SUMMARY_ENABLED    = "false"   # the demo engine sends one digest covering both accounts
+# The default (12) is tuned for the demo lab's data collection. On real money a
+# tight cap is a genuine risk control, not a data-rate knob.
+$env:MAX_CONCURRENT_TRADES    = "2"
 # LIVE_TRADING_ENABLED is intentionally NOT set here: it defaults to false, and
 # turning it on is a deliberate act documented in docs/going-live.md.
 

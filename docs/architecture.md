@@ -27,7 +27,7 @@ engine/            Python package - the persistent trading engine
 dashboard/          React + TypeScript SPA - GitHub Pages, Supabase JS client
 docs/                one doc per subsystem + this overview
 infra/               VPS/service setup guidance (Phase 6, not executed yet)
-scripts/             entrypoints: run_engine.py, backtest_ema_trend_v1.py, smoke_test_registry.py
+scripts/             entrypoints: run_engine.py, backtest.py, smoke_test_registry.py
 supabase/migrations/ numbered, additive SQL migrations - source of truth for DB schema/RLS
 config/plugins.yaml  which plugin backs each subsystem (not secret, committed)
 ```

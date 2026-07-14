@@ -86,7 +86,7 @@ pip install -e .
 cp .env.example .env            # fill in as needed - see docs/safety-rails.md for what's optional
 python scripts/smoke_test_registry.py   # sanity-check the plugin registry, no external calls needed
 python scripts/run_engine.py            # the actual persistent loop (needs MT5 terminal open + logged in)
-python scripts/backtest_ema_trend_v1.py # sanity-check the reference strategy against history
+python scripts/backtest.py ema_trend_v1 # sanity-check the reference strategy against history
 
 # dashboard (from dashboard/)
 npm install

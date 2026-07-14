@@ -10,7 +10,6 @@ from engine.sizing import size_position
 
 logger = logging.getLogger("engine.risk")
 
-MAX_CONCURRENT_TRADES = 2
 MAX_CONSECUTIVE_STOP_LOSSES = 3
 MAX_DAILY_LOSS_PCT = 3.0
 TEST_MODE_LOT_SIZE = 0.01
@@ -46,9 +45,10 @@ class DefaultRiskEngine(RiskEngine):
         broker: BrokerAdapter,
         risk_pct: float | None = None,
     ) -> RiskDecision:
+        cap = self._settings.max_concurrent_trades
         open_count = sum(1 for p in open_positions if p.status == PositionStatus.OPEN)
-        if open_count >= MAX_CONCURRENT_TRADES:
-            return RiskDecision(approved=False, reason=f"max concurrent trades reached ({MAX_CONCURRENT_TRADES})")
+        if open_count >= cap:
+            return RiskDecision(approved=False, reason=f"max concurrent trades reached ({cap})")
 
         if account_state.consecutive_stop_losses_today >= MAX_CONSECUTIVE_STOP_LOSSES:
             return RiskDecision(

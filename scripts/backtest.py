@@ -1,7 +1,15 @@
-"""Backtest + statistical evaluation for the ema_trend_v1 reference strategy.
+"""Backtest + statistical evaluation for ANY registered strategy.
+
+    python scripts/backtest.py ema_trend_v1
+
+This is the fast screening filter in front of the demo lab. The lab needs ~100
+live trades to reach a verdict, which at a typical trade rate is measured in
+years - so learning an idea is worthless by waiting for live data is the slowest
+possible way to learn it. This replays the same idea over years of real history
+in about two minutes. Screen here first; only promote survivors to the lab.
 
 Walks historical H1/H4 candles bar-by-bar through the exact same
-EMATrendStrategy.evaluate() the live engine uses (same window sizes as
+StrategyPlugin.evaluate() the live engine uses (same window sizes as
 engine/loop.py's CANDLE_COUNT), then simulates each fired signal forward to see
 whether its stop-loss or take-profit would have been hit first - now with
 transaction costs, realistic fills, and proper statistics.
@@ -26,13 +34,10 @@ assumed conservatively (see caveats printed at the end). It does not optimise
 parameters and is not walk-forward out-of-sample. Treat a positive result as
 "worth paper-trading forward," never as a guarantee.
 
-    python scripts/backtest_ema_trend_v1.py
 """
 
 from __future__ import annotations
 
-import random
-import statistics
 import sys
 from bisect import bisect_right
 from dataclasses import dataclass
@@ -43,11 +48,12 @@ import MetaTrader5 as mt5
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from engine.config import Settings
-from engine.core.interfaces.strategy import StrategyContext
+from engine.core.interfaces.strategy import StrategyContext, StrategyPlugin
 from engine.core.models import AccountState, Direction, Timeframe
 from engine.plugins.brokers.mt5_broker import MT5BrokerAdapter
 from engine.plugins.market_data.mt5_market_data import MT5MarketDataProvider
-from engine.plugins.strategies.ema_trend_v1 import EMATrendStrategy
+from engine.registry import PLUGIN_REGISTRY, load_plugin
+from engine.stats import bootstrap_expectancy_ci, longest_losing_streak, max_drawdown_r
 
 H1_WINDOW = 300  # matches engine/loop.py CANDLE_COUNT[H1]
 H4_WINDOW = 250  # matches engine/loop.py CANDLE_COUNT[H4]
@@ -60,9 +66,6 @@ MAX_HOLD_BARS = 200  # give up on a trade that never resolves within ~8 trading 
 # produces is lot-size-independent (see _cost_in_r), so this stays valid no
 # matter what lot the live risk engine actually sizes.
 COMMISSION_PER_LOT_ROUNDTURN = 7.0
-
-BOOTSTRAP_ITERATIONS = 10_000
-BOOTSTRAP_SEED = 20260713  # fixed so the reported CI is reproducible run-to-run
 
 PLACEHOLDER_ACCOUNT = AccountState(
     balance=10_000.0,
@@ -158,7 +161,7 @@ def simulate_outcome(
 
 
 def run_backtest_for_symbol(
-    strategy: EMATrendStrategy, md: MT5MarketDataProvider, symbol: str
+    strategy: StrategyPlugin, md: MT5MarketDataProvider, symbol: str
 ) -> list[TradeOutcome]:
     h1_all = md.get_candles(symbol, Timeframe.H1, H1_HISTORY_BARS)[:-1]  # drop forming bar
     h4_all = md.get_candles(symbol, Timeframe.H4, H1_HISTORY_BARS // 4 + H4_WINDOW)[:-1]
@@ -224,48 +227,6 @@ def run_backtest_for_symbol(
 # --- statistics -------------------------------------------------------------
 
 
-def max_drawdown_r(net_rs: list[float]) -> float:
-    """Largest peak-to-trough drop of the cumulative-R equity curve."""
-    peak = 0.0
-    equity = 0.0
-    max_dd = 0.0
-    for r in net_rs:
-        equity += r
-        peak = max(peak, equity)
-        max_dd = max(max_dd, peak - equity)
-    return max_dd
-
-
-def longest_losing_streak(outcomes: list[TradeOutcome]) -> int:
-    streak = 0
-    longest = 0
-    for o in outcomes:
-        if o.net_r < 0:
-            streak += 1
-            longest = max(longest, streak)
-        else:
-            streak = 0
-    return longest
-
-
-def bootstrap_expectancy_ci(net_rs: list[float]) -> tuple[float, float]:
-    """95% CI on mean R/trade by resampling trades with replacement. If this
-    interval straddles or sits below zero, the sample hasn't demonstrated a
-    real edge, however pretty the point estimate looks."""
-    n = len(net_rs)
-    if n < 2:
-        return (float("nan"), float("nan"))
-    rng = random.Random(BOOTSTRAP_SEED)
-    means = []
-    for _ in range(BOOTSTRAP_ITERATIONS):
-        sample = [net_rs[rng.randrange(n)] for _ in range(n)]
-        means.append(sum(sample) / n)
-    means.sort()
-    lo = means[int(0.025 * BOOTSTRAP_ITERATIONS)]
-    hi = means[int(0.975 * BOOTSTRAP_ITERATIONS)]
-    return (lo, hi)
-
-
 def summarize(label: str, outcomes: list[TradeOutcome]) -> None:
     n = len(outcomes)
     if n == 0:
@@ -305,16 +266,37 @@ def summarize(label: str, outcomes: list[TradeOutcome]) -> None:
 
 
 def main() -> None:
+    keys = sorted(PLUGIN_REGISTRY["strategy"])
+    if len(sys.argv) < 2:
+        print("usage: python scripts/backtest.py <strategy_key>")
+        print(f"registered strategies: {', '.join(keys)}")
+        raise SystemExit(2)
+
+    key = sys.argv[1]
+    if key not in keys:
+        print(f"unknown strategy '{key}'. registered: {', '.join(keys)}")
+        raise SystemExit(2)
+
     settings = Settings()
+    # Built through the registry, so this screens ANY strategy the live engine
+    # can run - same class, same code path, no separate backtest-only variant to
+    # drift out of sync with what actually trades.
+    strategy = load_plugin("strategy", key, settings)
+
     broker = MT5BrokerAdapter(settings)
     broker.connect()  # blank MT5_LOGIN -> read-only attach, no session bump
     md = MT5MarketDataProvider(settings)
-    strategy = EMATrendStrategy(settings)
 
+    print(f"Backtesting '{strategy.name}' over {len(strategy.instruments)} instrument(s)\n")
     all_outcomes: list[TradeOutcome] = []
     print("Per-instrument (net of costs):\n")
     for symbol in strategy.instruments:
-        outcomes = run_backtest_for_symbol(strategy, md, symbol)
+        try:
+            outcomes = run_backtest_for_symbol(strategy, md, symbol)
+        except Exception as exc:
+            # One unavailable symbol must not sink the whole screening run.
+            print(f"{symbol}: skipped ({type(exc).__name__}: {exc})\n")
+            continue
         all_outcomes.extend(outcomes)
         summarize(symbol, outcomes)
 
@@ -326,9 +308,14 @@ def main() -> None:
 
     all_outcomes.sort(key=lambda o: o.entry_time)
     span = f"{all_outcomes[0].entry_time}  ->  {all_outcomes[-1].entry_time}"
+    years = max((all_outcomes[-1].entry_time - all_outcomes[0].entry_time).days / 365.25, 0.01)
+    per_year = len(all_outcomes) / years
     print("=" * 60)
     print(f"History span of signals: {span}")
-    print(f"Commission assumed: ${COMMISSION_PER_LOT_ROUNDTURN:.2f} round-turn per 1.0 lot\n")
+    print(f"Commission assumed: ${COMMISSION_PER_LOT_ROUNDTURN:.2f} round-turn per 1.0 lot")
+    # Trade rate is a first-class result: a strategy that can't produce enough
+    # trades to be judged can never earn a READY verdict, however good it looks.
+    print(f"Trade rate: {per_year:.0f}/year  ->  ~{100 / per_year:.1f} years to reach 100 live trades\n")
 
     summarize("ALL INSTRUMENTS", all_outcomes)
 

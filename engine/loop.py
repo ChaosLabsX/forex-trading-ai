@@ -15,7 +15,6 @@ from engine.supabase_client import SupabaseClient
 
 logger = logging.getLogger("engine.loop")
 
-INSTRUMENTS = ("EURUSD", "GBPUSD", "USDJPY", "XAUUSD")
 CONTEXT_TIMEFRAMES = (Timeframe.H1, Timeframe.H4, Timeframe.D1)
 # H4 needs to cover EMATrendStrategy's REGIME_SLOW_EMA (200) + margin, or every
 # evaluation silently fails at the "insufficient history" check before any
@@ -125,6 +124,12 @@ class EngineLoop:
         # sizing missing) is reported once rather than every single cycle
         self._logged_blocks: dict[str, str] = {}
         self._paused = False
+        # Instruments are whatever the configured strategies actually ask for -
+        # never a second hardcoded list to fall out of sync with them. Widening a
+        # strategy's coverage is then a plugin change, nothing else.
+        self._instruments: tuple[str, ...] = tuple(
+            dict.fromkeys(sym for s in engine.strategies for sym in s.instruments)
+        )
 
     # ------------------------------------------------------------- identity
 
@@ -322,7 +327,7 @@ class EngineLoop:
             except Exception:
                 logger.exception("failed to fetch upcoming news events")
 
-        for symbol in INSTRUMENTS:
+        for symbol in self._instruments:
             candles_by_timeframe: dict[Timeframe, list[Candle]] = {}
             for timeframe in CONTEXT_TIMEFRAMES:
                 try:

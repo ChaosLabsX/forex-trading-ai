@@ -23,11 +23,32 @@ SESSION_START_UTC_HOUR = 12
 SESSION_END_UTC_HOUR = 16
 
 NEWS_BLACKOUT_MINUTES = 30
+# Widened from 4 symbols to 16. The logic is unchanged - this is purely a data
+# rate decision. At 4 symbols this strategy produced ~19 trades/year, so the
+# lab's 100-trade bar was ~5 years away and the verdict would never arrive.
+# Same idea, more independent samples of it, sooner.
+#
+# Caveat worth knowing: these are NOT statistically independent. EURUSD, GBPUSD
+# and EURGBP share drivers, so correlated signals inflate the apparent sample.
+# The bootstrap CI assumes independence and will therefore read slightly tighter
+# than reality. It's a real limitation, and still far better than 19/year.
 INSTRUMENT_CURRENCIES = {
     "EURUSD": ("EUR", "USD"),
     "GBPUSD": ("GBP", "USD"),
     "USDJPY": ("USD", "JPY"),
     "XAUUSD": ("USD",),
+    "AUDUSD": ("AUD", "USD"),
+    "USDCAD": ("USD", "CAD"),
+    "USDCHF": ("USD", "CHF"),
+    "NZDUSD": ("NZD", "USD"),
+    "EURJPY": ("EUR", "JPY"),
+    "GBPJPY": ("GBP", "JPY"),
+    "EURGBP": ("EUR", "GBP"),
+    "AUDJPY": ("AUD", "JPY"),
+    "EURAUD": ("EUR", "AUD"),
+    "GBPAUD": ("GBP", "AUD"),
+    "CADJPY": ("CAD", "JPY"),
+    "CHFJPY": ("CHF", "JPY"),
 }
 
 
@@ -42,7 +63,7 @@ class EMATrendStrategy(StrategyPlugin):
 
     name = "ema_trend_v1"
     required_timeframes = (ENTRY_TIMEFRAME, REGIME_TIMEFRAME)
-    instruments = ("EURUSD", "GBPUSD", "USDJPY", "XAUUSD")
+    instruments = tuple(INSTRUMENT_CURRENCIES)
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
