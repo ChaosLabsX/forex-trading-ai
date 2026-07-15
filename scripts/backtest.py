@@ -321,14 +321,18 @@ def summarize(label: str, outcomes: list[TradeOutcome]) -> None:
 def main() -> None:
     keys = sorted(PLUGIN_REGISTRY["strategy"])
     if len(sys.argv) < 2:
-        print("usage: python scripts/backtest.py <strategy_key>")
+        print("usage: python scripts/backtest.py <strategy_key> [symbol]")
         print(f"registered strategies: {', '.join(keys)}")
+        print("\nPassing a symbol restricts the run to it AND gives you its own")
+        print("first-half/second-half split - which is how you interrogate a")
+        print("single promising symbol instead of admiring it.")
         raise SystemExit(2)
 
     key = sys.argv[1]
     if key not in keys:
         print(f"unknown strategy '{key}'. registered: {', '.join(keys)}")
         raise SystemExit(2)
+    only_symbol = sys.argv[2].upper() if len(sys.argv) > 2 else None
 
     settings = Settings()
     # Built through the registry, so this screens ANY strategy the live engine
@@ -354,10 +358,23 @@ def main() -> None:
             "         already answered.\n"
         )
 
-    print(f"Backtesting '{strategy.name}' over {len(strategy.instruments)} instrument(s)\n")
+    symbols = strategy.instruments
+    if only_symbol is not None:
+        if only_symbol not in symbols:
+            print(f"'{only_symbol}' is not in {strategy.name}'s instruments: {', '.join(symbols)}")
+            raise SystemExit(2)
+        symbols = (only_symbol,)
+        print(
+            f"NOTE: restricted to {only_symbol}. If you are here because this symbol looked\n"
+            f"      good in a 16-symbol run, remember that was 1 of 48 tests - roughly the\n"
+            f"      rate at which pure noise manufactures a 'winner'. The half-split below\n"
+            f"      is the question that matters: does it hold in BOTH halves?\n"
+        )
+
+    print(f"Backtesting '{strategy.name}' over {len(symbols)} instrument(s)\n")
     all_outcomes: list[TradeOutcome] = []
     print("Per-instrument (net of costs):\n")
-    for symbol in strategy.instruments:
+    for symbol in symbols:
         try:
             outcomes = run_backtest_for_symbol(strategy, md, symbol)
         except Exception as exc:
