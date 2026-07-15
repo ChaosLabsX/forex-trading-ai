@@ -340,6 +340,18 @@ def summarize(label: str, outcomes: list[TradeOutcome]) -> None:
     lo, hi = bootstrap_expectancy_ci(net_rs)
     edge = "POSITIVE" if lo > 0 else ("negative" if hi < 0 else "not distinguishable from zero")
 
+    # GROSS is measured, never inferred. It answers a different question to net:
+    # "does this predict price at all?" - independent of what the broker charges.
+    # A significant gross edge with a losing net says the idea works and the
+    # tolls exceed it, which is a completely different problem to a dead idea.
+    # I once asserted this CI from arithmetic instead of computing it; a claim
+    # that a real edge exists has to be measured.
+    gross_rs = [o.gross_r for o in outcomes]
+    glo, ghi = bootstrap_expectancy_ci(gross_rs)
+    gross_edge = (
+        "POSITIVE" if glo > 0 else ("negative" if ghi < 0 else "not distinguishable from zero")
+    )
+
     print(f"{label}:")
     print(f"  trades           {n}  ({len(wins)}W / {len(losses)}L / {len(timeouts)} timeout)")
     print(f"  win rate         {win_rate:.1f}%  (of resolved)")
@@ -358,6 +370,12 @@ def summarize(label: str, outcomes: list[TradeOutcome]) -> None:
     print(f"  max drawdown     {max_drawdown_r(net_rs):.2f}R")
     print(f"  longest losing   {longest_losing_streak(net_rs)} in a row")
     print(f"  expectancy 95%CI [{lo:+.3f}, {hi:+.3f}] R/trade  -> edge {edge}")
+    print(
+        f"  GROSS expectancy {gross_total / n:+.3f} R/trade  95%CI [{glo:+.3f}, {ghi:+.3f}]"
+        f"  -> signal {gross_edge}"
+    )
+    if glo > 0 and lo <= 0:
+        print("     ^ the idea predicts price, but costs exceed what it predicts")
     print()
 
 

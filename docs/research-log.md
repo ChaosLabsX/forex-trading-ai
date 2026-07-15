@@ -82,6 +82,46 @@ same coin flip and call the echo confirmation.
 XNGUSD (0.070R) are cheap, clean and large-sampled, and both fail. The
 hypothesis died on its best ground. **Falsified.**
 
+## The scale test: why the one real edge cannot be reached
+
+`range_fade_v1` has a genuine gross edge (+0.044R/trade) that its 0.066R costs
+consume. Cost-in-R is `commission / (stop x value)`, so it shrinks as the stop
+grows: the identical signal on a bigger bar should carry less drag. That is
+arithmetic, not a hope, and it makes a clean prediction - if the edge is
+scale-invariant, H4 halves the cost and the net turns positive.
+
+`range_fade_h4_v1` tested it. Identical logic (asserted: `evaluate()` is the same
+function object), only the timeframes moved. **The prediction split in two:**
+
+| | H1 | H4 |
+|---|---|---|
+| Cost / trade | 0.066R | **0.031R** - halved, exactly as predicted |
+| **Gross / trade** | **+0.044R** | **-0.008R** - gone |
+
+Net -0.042R, CI [-0.074, -0.010] → **negative**, over **12.7 years** (H4 history
+reaches 2013 - a *longer* sample than the H1 run) and negative in both halves.
+
+**The cost model is trustworthy. Scale-invariance was wrong.** The edge lives at
+one hour and is absent at four.
+
+### The finding that matters
+
+Mean reversion at H1 is a short-term order-flow imbalance correcting itself; by
+H4 it has already played out. It is a *fast* effect - and fast effects are
+exactly where costs dominate, because the same toll is charged against a much
+smaller move.
+
+> **The edge survives only at the timescale where it is too expensive to trade.**
+
+That is not bad luck. It is *why it still exists*. An effect this cheap to
+capture would have been arbitraged away long ago; the cost barrier is what
+preserves it. Retail costs do not merely reduce this edge - they are the reason
+there is anything left to find.
+
+Do not read "there is a real gross edge" as encouragement. Read it as: the
+market is efficient *net of costs*, which is the only sense in which efficiency
+was ever claimed.
+
 ## Incidental findings worth not rediscovering
 
 - **Platinum/palladium are structurally untradeable with ATR stops.** Their
