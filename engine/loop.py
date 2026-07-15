@@ -6,7 +6,14 @@ from datetime import date, datetime, timedelta, timezone
 
 from engine.config import Settings
 from engine.core.interfaces.strategy import StrategyContext
-from engine.core.models import Candle, ClosedTradePnl, NotificationEvent, Position, Timeframe
+from engine.core.models import (
+    Candle,
+    ClosedTradePnl,
+    Direction,
+    NotificationEvent,
+    Position,
+    Timeframe,
+)
 from engine.evaluator import ReadinessEvaluator
 from engine.gating import StrategyGate
 from engine.registry import EngineComposition
@@ -15,7 +22,7 @@ from engine.reporting import (
     engine_event,
     format_readiness_change,
     parse_daily_time,
-    stop_moved,
+    stop_protected,
     trade_closed,
     trade_opened,
 )
@@ -450,20 +457,40 @@ class EngineLoop:
                 logger.exception("failed managing position %s", position.id)
                 continue
             if updated is not None:
-                self._on_stop_moved(updated)
+                self._on_stop_moved(position, updated)
 
-    def _on_stop_moved(self, position: Position) -> None:
+    @staticmethod
+    def _is_protected(position: Position) -> bool:
+        """Stop at or beyond entry - the trade can no longer lose."""
+        if position.stop_loss is None:
+            return False
+        if position.direction == Direction.LONG:
+            return position.stop_loss >= position.entry_price
+        return position.stop_loss <= position.entry_price
+
+    def _on_stop_moved(self, before: Position, after: Position) -> None:
         try:
             self._supabase.update(
-                "trades", {"mt5_ticket": f"eq.{position.id}"}, {"stop_loss": position.stop_loss}
+                "trades", {"mt5_ticket": f"eq.{after.id}"}, {"stop_loss": after.stop_loss}
             )
         except Exception:
-            logger.exception("failed to sync moved stop for trade %s", position.id)
-        _notify_all(
-            self._engine,
-            "stop_moved",
-            stop_moved(position, self._account_label()),
+            logger.exception("failed to sync moved stop for trade %s", after.id)
+
+        strategy = self._ticket_owner.get(after.id, "unknown")
+        logger.info(
+            "stop moved: %s %s (%s) -> %s", strategy, after.symbol, after.id, after.stop_loss
         )
+
+        # Push ONCE per trade - when it first becomes risk-free. Later trailing
+        # steps are real but incremental: a runner to +3R fired four near
+        # -identical alerts, none of which asked anything of you. Those live in
+        # the log now. The crossing into "cannot lose" is the one that matters.
+        if self._is_protected(after) and not self._is_protected(before):
+            _notify_all(
+                self._engine,
+                "stop_protected",
+                stop_protected(after, strategy, self._account_label()),
+            )
 
     def _evaluate_strategies(
         self,

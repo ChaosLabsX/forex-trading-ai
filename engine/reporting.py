@@ -26,19 +26,26 @@ def money(value: float) -> str:
 
 
 def price(value: float | None, like: float | None = None) -> str:
-    """Format a price at the instrument's own precision.
+    """Format a price at the instrument's conventional precision.
 
-    ATR arithmetic yields raw floats, so a stop printed unrounded reads
-    `0.8086272890512113` - 16 digits of noise in a glanceable alert. MT5 hands
-    back entry prices already rounded to the symbol's digits, so `like` (the
-    entry) tells us the precision the instrument actually uses, with no need to
-    plumb symbol_info into every message."""
+    ATR arithmetic yields raw floats, so an unrounded stop reads
+    `0.8086272890512113` - 16 digits of noise in a glanceable alert.
+
+    Precision comes from the price's MAGNITUDE, not from the float's repr.
+    repr() drops trailing zeros, so an entry of 1.34700 prints as "1.347" and a
+    stop would silently render 3 digits while its neighbour rendered 5 - the kind
+    of inconsistency that makes a reader doubt every other number. Magnitude
+    matches FX convention across this whole universe: EURUSD 1.14 -> 5, USDJPY
+    162 -> 3, XAUUSD 3300 -> 2, BTCUSD -> 2."""
     if value is None:
         return "-"
-    digits = 5
-    if like is not None:
-        text = repr(float(like))
-        digits = len(text.split(".")[1]) if "." in text else 0
+    reference = abs(like if like is not None else value)
+    if reference < 10:
+        digits = 5
+    elif reference < 1000:
+        digits = 3
+    else:
+        digits = 2
     return f"{value:.{digits}f}"
 
 
@@ -113,12 +120,19 @@ def trade_closed(symbol: str, direction, breakdown, strategy: str, account: str)
     )
 
 
-def stop_moved(position, account: str) -> str:
+def stop_protected(position, strategy: str, account: str) -> str:
+    """Sent ONCE per trade, the moment its stop reaches entry.
+
+    That instant is the only one worth pushing: the trade can no longer lose.
+    Every later trailing step is real but incremental - a runner to +3R fired
+    four near-identical alerts, none of them actionable. Those are logged
+    instead. And the strategy name is here because two strategies can now hold
+    the same symbol independently, so "GBPUSD" alone is ambiguous."""
     return _line(
         "🛡",
-        f"STOP MOVED  ·  {position.symbol}",
-        account,
-        f"now {price(position.stop_loss, position.entry_price)}  ·  locking in profit",
+        f"RISK-FREE  ·  {position.symbol} {position.direction.value}",
+        f"{strategy}  ·  {account}",
+        f"stop at entry {price(position.stop_loss, position.entry_price)}  ·  can no longer lose",
     )
 
 
