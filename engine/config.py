@@ -49,16 +49,18 @@ class Settings(BaseSettings):
     # Refuse a trade whose margin would eat more than this share of free margin.
     max_margin_use_pct: float = 25.0
 
-    # Account-wide cap on simultaneously open positions.
+    # Cap on simultaneously open positions PER STRATEGY (not per account).
     #
-    # The default suits the DEMO LAB, whose job is collecting unbiased data: a
-    # tight cap silently drops signals a strategy would have taken, and a trade
-    # that never gets recorded biases that strategy's track record downward
-    # while slowing its verdict. Fake money, so breadth beats caution here.
+    # Per-strategy is what makes the lab valid: with a shared pool, strategies
+    # race for slots and the loser's signal is silently never recorded, biasing
+    # its track record by its neighbours' luck. Each strategy is an independent
+    # experiment, so each gets its own budget.
     #
-    # infra/run-live-engine.ps1 overrides this to 2 for the live account, where
-    # it is a real risk control rather than a data-collection knob.
-    max_concurrent_trades: int = 12
+    # The default suits the DEMO LAB, where money is fake and the only cost of
+    # breadth is broker load. infra/run-live-engine.ps1 pins live to 2, where
+    # this is a real risk control rather than a data-collection knob - and live
+    # runs one Ready strategy anyway, so per-strategy and per-account coincide.
+    max_concurrent_trades: int = 4
 
     # --- Readiness thresholds (engine/evaluator.py) -------------------------
     # A strategy is only READY when a bootstrap 95% CI on its expectancy sits

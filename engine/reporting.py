@@ -20,9 +20,110 @@ _LABEL = {NOT_READY: "Not ready", ALMOST_READY: "Almost ready", READY: "READY"}
 STALE_HEARTBEAT_SECONDS = 5 * 60
 
 
-def _money(value: float) -> str:
+def money(value: float) -> str:
     sign = "-" if value < 0 else "+"
     return f"{sign}${abs(value):,.2f}"
+
+
+def price(value: float | None, like: float | None = None) -> str:
+    """Format a price at the instrument's own precision.
+
+    ATR arithmetic yields raw floats, so a stop printed unrounded reads
+    `0.8086272890512113` - 16 digits of noise in a glanceable alert. MT5 hands
+    back entry prices already rounded to the symbol's digits, so `like` (the
+    entry) tells us the precision the instrument actually uses, with no need to
+    plumb symbol_info into every message."""
+    if value is None:
+        return "-"
+    digits = 5
+    if like is not None:
+        text = repr(float(like))
+        digits = len(text.split(".")[1]) if "." in text else 0
+    return f"{value:.{digits}f}"
+
+
+def _money(value: float) -> str:  # kept for existing callers
+    return money(value)
+
+
+# --- the message grammar ----------------------------------------------------
+#
+# Every alert has the same three-line shape, so the eye always finds the same
+# thing in the same place:
+#
+#   <icon> HEADLINE · the number that matters
+#   context (strategy · account)
+#   detail, one line, only if it earns its place
+#
+# No event-type tag: "[trade_closed] ✅ WIN" says WIN twice. The icon and the
+# headline are the tag.
+
+
+def _line(icon: str, headline: str, context: str = "", detail: str = "") -> str:
+    out = [f"{icon} {headline}"]
+    if context:
+        out.append(context)
+    if detail:
+        out.append(detail)
+    return "\n".join(out)
+
+
+def trade_opened(position, strategy: str, account: str, risk_amount: float | None) -> str:
+    bits = [f"{position.lot_size} lot @ {price(position.entry_price, position.entry_price)}"]
+    if risk_amount:
+        bits.append(f"risk {money(-risk_amount)}")
+    detail = "  ·  ".join(bits)
+    if position.stop_loss is not None and position.take_profit is not None:
+        detail += (
+            f"\nSL {price(position.stop_loss, position.entry_price)}"
+            f"  ·  TP {price(position.take_profit, position.entry_price)}"
+        )
+    return _line(
+        "🟢",
+        f"OPEN  ·  {position.symbol} {position.direction.value}",
+        f"{strategy}  ·  {account}",
+        detail,
+    )
+
+
+def trade_closed(symbol: str, direction, breakdown, strategy: str, account: str) -> str:
+    """A win reports gross profit before fees; a loss reports the all-in figure.
+    Win/loss is decided by the NET result, so a small gain eaten by commission
+    correctly reads as a loss."""
+    subject = f"{symbol} {direction}" if direction else symbol
+    if breakdown is None:
+        return _line(
+            "⚪", f"CLOSED  ·  {subject}", f"{strategy}  ·  {account}", "result unavailable"
+        )
+    if breakdown.net >= 0:
+        detail = "before fees"
+        if abs(breakdown.fees) >= 0.005:
+            detail += f"  ·  fees {money(breakdown.fees)}"
+        return _line(
+            "✅",
+            f"WIN  ·  {subject}  ·  {money(breakdown.gross_profit)}",
+            f"{strategy}  ·  {account}",
+            detail,
+        )
+    return _line(
+        "🔴",
+        f"LOSS  ·  {subject}  ·  {money(breakdown.net)}",
+        f"{strategy}  ·  {account}",
+        "incl. fees",
+    )
+
+
+def stop_moved(position, account: str) -> str:
+    return _line(
+        "🛡",
+        f"STOP MOVED  ·  {position.symbol}",
+        account,
+        f"now {price(position.stop_loss, position.entry_price)}  ·  locking in profit",
+    )
+
+
+def engine_event(icon: str, headline: str, account: str, detail: str = "") -> str:
+    return _line(icon, headline, account, detail)
 
 
 def stats_line(s: TradeStats) -> str:
@@ -43,16 +144,19 @@ def stats_line(s: TradeStats) -> str:
 def format_readiness_change(strategy: dict, previous: str | None, evaluation: Evaluation) -> str:
     promoted = _RANK.get(evaluation.verdict, 0) > _RANK.get(previous or NOT_READY, 0)
     name = strategy.get("display_name") or strategy.get("name")
+    icon = "🏆" if evaluation.verdict == READY else ("⬆️" if promoted else "⚠️")
+    headline = _LABEL.get(evaluation.verdict, evaluation.verdict)
+
     lines = [
-        f"{'⬆️' if promoted else '⚠️'} STRATEGY {'PROMOTED' if promoted else 'DEMOTED'}  ·  {name}",
-        f"{_LABEL.get(previous or NOT_READY, previous)} → {_LABEL.get(evaluation.verdict, evaluation.verdict)}",
-        f"Why: {evaluation.reason}",
+        f"{icon} {headline}  ·  {name}",
+        f"was {_LABEL.get(previous or NOT_READY, previous).lower()}",
         stats_line(evaluation.stats),
+        evaluation.reason,
     ]
     if evaluation.verdict == READY:
-        lines.append("Now eligible for live trading (if you enable it on the live account).")
+        lines.append("→ eligible for live once you enable it")
     elif previous == READY:
-        lines.append("Live trading for this strategy stops now unless you explicitly override it.")
+        lines.append("→ live trading stops unless you override")
     return "\n".join(lines)
 
 

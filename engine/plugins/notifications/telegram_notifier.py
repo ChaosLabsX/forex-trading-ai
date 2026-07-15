@@ -17,8 +17,12 @@ class TelegramNotifier(NotificationProvider):
         self._chat_id = settings.telegram_chat_id
 
     def notify(self, event: NotificationEvent) -> None:
+        # The message carries its own icon + headline, so prefixing the raw
+        # event_type just says the same thing twice in machine voice
+        # ("[trade_closed] ✅ WIN ..."). Formatting lives in engine/reporting.py;
+        # this plugin only delivers.
         payload = urllib.parse.urlencode(
-            {"chat_id": self._chat_id, "text": f"[{event.event_type}] {event.message}"}
+            {"chat_id": self._chat_id, "text": event.message}
         ).encode()
         request = urllib.request.Request(self._url, data=payload, method="POST")
         try:

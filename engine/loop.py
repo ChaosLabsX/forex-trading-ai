@@ -10,7 +10,15 @@ from engine.core.models import Candle, ClosedTradePnl, NotificationEvent, Positi
 from engine.evaluator import ReadinessEvaluator
 from engine.gating import StrategyGate
 from engine.registry import EngineComposition
-from engine.reporting import build_daily_summary, format_readiness_change, parse_daily_time
+from engine.reporting import (
+    build_daily_summary,
+    engine_event,
+    format_readiness_change,
+    parse_daily_time,
+    stop_moved,
+    trade_closed,
+    trade_opened,
+)
 from engine.supabase_client import SupabaseClient
 
 logger = logging.getLogger("engine.loop")
@@ -47,41 +55,6 @@ def _notify_all(engine: EngineComposition, event_type: str, message: str) -> Non
             notifier.notify(NotificationEvent(event_type=event_type, message=message))
         except Exception:
             logger.exception("notification provider failed")
-
-
-def _money(value: float) -> str:
-    # e.g. +$1.50 / -$2.10 - sign before the currency symbol, USD account
-    sign = "-" if value < 0 else "+"
-    return f"{sign}${abs(value):,.2f}"
-
-
-def _format_close_message(
-    symbol: str, direction, breakdown: ClosedTradePnl | None, account: str = "", strategy: str = ""
-) -> str:
-    """A win is shown as gross profit before fees; a loss is shown all-in
-    (fees included), per how the account actually moved. Win/loss is decided by
-    the net result. Works the same on demo or a real account."""
-    dir_txt = f" {direction}" if direction else ""
-    tag = "  ·  ".join(x for x in (account, strategy) if x)
-    suffix = f"  ·  {tag}" if tag else ""
-    if breakdown is None:
-        return f"CLOSED{suffix}\n{symbol}{dir_txt} - result unavailable (no deal history found)"
-
-    if breakdown.net >= 0:
-        lines = [
-            f"✅ WIN{suffix}",
-            f"{symbol}{dir_txt}",
-            f"Profit: {_money(breakdown.gross_profit)}  (before fees)",
-        ]
-        if abs(breakdown.fees) >= 0.005:
-            lines.append(f"Fees: {_money(breakdown.fees)}")
-    else:
-        lines = [
-            f"\U0001F534 LOSS{suffix}",
-            f"{symbol}{dir_txt}",
-            f"Loss: {_money(breakdown.net)}  (incl. fees)",
-        ]
-    return "\n".join(lines)
 
 
 def _candle_row(candle) -> dict:
@@ -123,6 +96,8 @@ class EngineLoop:
         # strategy -> last logged block reason, so a permanent block (e.g. live
         # sizing missing) is reported once rather than every single cycle
         self._logged_blocks: dict[str, str] = {}
+        # broker ticket -> owning strategy, refreshed each cycle from `trades`
+        self._ticket_owner: dict[str, str] = {}
         self._paused = False
         # Instruments are whatever the configured strategies actually ask for -
         # never a second hardcoded list to fall out of sync with them. Widening a
@@ -162,8 +137,12 @@ class EngineLoop:
         _notify_all(
             self._engine,
             "startup",
-            f"Engine loop starting  ·  {self._account_label()}  ·  account {self._account_key}"
-            + (f"\n⛔ {gate.account_block}" if gate.account_block else ""),
+            engine_event(
+                "🚀",
+                "ENGINE STARTED",
+                f"{self._account_label()}  ·  {len(known)} strategies  ·  {len(self._instruments)} symbols",
+                gate.account_block or "",
+            ),
         )
         try:
             while True:
@@ -171,7 +150,7 @@ class EngineLoop:
                 time.sleep(POLL_INTERVAL_SECONDS)
         except KeyboardInterrupt:
             logger.info("shutdown requested")
-            _notify_all(self._engine, "shutdown", "Engine loop stopped (keyboard interrupt).")
+            _notify_all(self._engine, "shutdown", engine_event("⏹", "ENGINE STOPPED", self._account_label()))
         finally:
             if self._engine.broker is not None:
                 try:
@@ -252,14 +231,16 @@ class EngineLoop:
                 self._connected = True
                 self._backoff_index = 0
                 logger.info("broker connected")
-                _notify_all(self._engine, "broker_connected", "MT5 broker connected.")
+                _notify_all(self._engine, "broker_connected", engine_event("🔌", "BROKER CONNECTED", self._account_label()))
             return
 
         if self._connected:
             self._connected = False
             logger.warning("broker disconnected")
             _notify_all(
-                self._engine, "broker_disconnected", "MT5 broker disconnected - attempting to reconnect."
+                self._engine,
+                "broker_disconnected",
+                engine_event("⚠️", "BROKER DISCONNECTED", self._account_label(), "reconnecting"),
             )
 
         try:
@@ -267,7 +248,7 @@ class EngineLoop:
             self._connected = True
             self._backoff_index = 0
             logger.info("broker (re)connected")
-            _notify_all(self._engine, "broker_connected", "MT5 broker (re)connected.")
+            _notify_all(self._engine, "broker_connected", engine_event("🔌", "BROKER RECONNECTED", self._account_label()))
         except Exception as exc:
             wait = RECONNECT_BACKOFF_SECONDS[min(self._backoff_index, len(RECONNECT_BACKOFF_SECONDS) - 1)]
             logger.error("reconnect failed, retrying in %ss: %s", wait, exc)
@@ -315,6 +296,7 @@ class EngineLoop:
                 account_state = broker.get_account_state()
                 open_positions = broker.get_open_positions()
                 self._reconcile_closed_trades(open_positions)
+                self._refresh_ownership()
             except Exception:
                 logger.exception("failed to fetch account state/open positions")
 
@@ -349,6 +331,35 @@ class EngineLoop:
                     symbol, candles_by_timeframe, account_state, open_positions, upcoming_news
                 )
 
+    def _refresh_ownership(self) -> None:
+        """Map broker ticket -> owning strategy, from our own trades table.
+
+        MT5 has no idea which strategy opened a position, so without this every
+        strategy sees every other strategy's trades. Two things went wrong as a
+        result, both fatal to a research lab:
+
+          * a strategy was BLOCKED from a symbol another strategy happened to
+            reach first - and a signal that never fires is never recorded, so
+            each strategy's record was biased by its neighbours' luck;
+          * strategies opened opposite sides of one symbol on the same bar (a
+            real GBPJPY long AND short, seconds apart) because the shared
+            position snapshot predated both trades.
+
+        Ownership makes each strategy an independent experiment that shares only
+        a price feed. Positions we have no record of (opened by hand, or
+        predating this) belong to nobody and stay hidden from every strategy."""
+        try:
+            rows = self._supabase.select(
+                "trades", {"status": "eq.OPEN", "account_key": f"eq.{self._account_key}"}
+            )
+        except Exception:
+            logger.exception("failed to map positions to strategies - skipping this cycle")
+            return
+        self._ticket_owner = {r["mt5_ticket"]: r["strategy_name"] for r in rows}
+
+    def _positions_of(self, strategy_name: str, open_positions: list) -> list:
+        return [p for p in open_positions if self._ticket_owner.get(p.id) == strategy_name]
+
     def _process_commands(self) -> None:
         try:
             # Only this account's commands - with two engines running, each must
@@ -372,12 +383,12 @@ class EngineLoop:
                 if command_type == "pause":
                     self._paused = True
                     logger.info("PAUSED via dashboard command")
-                    _notify_all(self._engine, "paused", "Trading paused via dashboard command.")
+                    _notify_all(self._engine, "paused", engine_event("⏸", "PAUSED", self._account_label(), "no new trades"))
                     self._immediate_heartbeat()
                 elif command_type == "resume":
                     self._paused = False
                     logger.info("RESUMED via dashboard command")
-                    _notify_all(self._engine, "resumed", "Trading resumed via dashboard command.")
+                    _notify_all(self._engine, "resumed", engine_event("▶️", "RESUMED", self._account_label()))
                     self._immediate_heartbeat()
                 elif command_type == "emergency_close_all":
                     self._emergency_close_all()
@@ -451,7 +462,7 @@ class EngineLoop:
         _notify_all(
             self._engine,
             "stop_moved",
-            f"{position.symbol} {position.id}: stop moved to {position.stop_loss} (locking in profit).",
+            stop_moved(position, self._account_label()),
         )
 
     def _evaluate_strategies(
@@ -482,12 +493,18 @@ class EngineLoop:
             if self._last_evaluated_bar.get(dedupe_key) == latest_closed_bar_time:
                 continue  # already evaluated this closed bar - avoid duplicate log rows
 
+            # Only this strategy's own positions. Each strategy is an
+            # independent experiment that happens to share a price feed; showing
+            # it a neighbour's trades is what let them block each other and hedge
+            # the same symbol on one bar.
+            own_positions = self._positions_of(strategy.name, open_positions)
+
             try:
                 context = StrategyContext(
                     symbol=symbol,
                     candles_by_timeframe=candles_by_timeframe,
                     account_state=account_state,
-                    open_positions=open_positions,
+                    open_positions=own_positions,
                     upcoming_news=upcoming_news,
                 )
                 evaluation = strategy.evaluate(context)
@@ -501,13 +518,14 @@ class EngineLoop:
             risk_reason = None
             if evaluation.signal is not None:
                 logger.info("SIGNAL fired: %s %s %s", strategy.name, symbol, evaluation.signal.direction.value)
-                _notify_all(
-                    self._engine,
-                    "signal_fired",
-                    f"{strategy.name} {symbol} {evaluation.signal.direction.value}: {evaluation.reason}",
-                )
+                # No Telegram for a fired signal: it is immediately followed by
+                # either an OPEN alert or a rejection, so announcing it as well
+                # just doubles the traffic to say the same thing.
+                # Own positions again, so max_concurrent_trades caps each
+                # strategy rather than being a shared pool they race for -
+                # whoever lost that race had a signal silently dropped.
                 risk_approved, risk_reason = self._route_through_risk_engine(
-                    strategy.name, evaluation.signal, account_state, open_positions
+                    strategy.name, evaluation.signal, account_state, own_positions
                 )
             else:
                 logger.info("no signal: %s %s - %s", strategy.name, symbol, evaluation.reason)
@@ -685,16 +703,11 @@ class EngineLoop:
             "TRADE OPENED: %s %s %s %s lot @ %s",
             strategy_name, position.symbol, position.direction.value, position.lot_size, position.entry_price,
         )
-        lines = [
-            f"\U0001F535 OPENED  ·  {self._account_label()}  ·  {strategy_name}",
-            f"{position.symbol} {position.direction.value}",
-            f"{position.lot_size} lot @ {position.entry_price}",
-        ]
-        if position.stop_loss is not None and position.take_profit is not None:
-            lines.append(f"SL {position.stop_loss}  ·  TP {position.take_profit}")
-        if risk_amount:
-            lines.append(f"Risk: {_money(-risk_amount)} if stopped")
-        _notify_all(self._engine, "trade_opened", "\n".join(lines))
+        _notify_all(
+            self._engine,
+            "trade_opened",
+            trade_opened(position, strategy_name, self._account_label(), risk_amount),
+        )
 
     def _reconcile_closed_trades(self, open_positions: list) -> None:
         broker = self._engine.broker
@@ -749,12 +762,12 @@ class EngineLoop:
             _notify_all(
                 self._engine,
                 "trade_closed",
-                _format_close_message(
+                trade_closed(
                     row["symbol"],
                     row.get("direction"),
                     breakdown,
-                    account=self._account_label(),
                     strategy=row.get("strategy_name", ""),
+                    account=self._account_label(),
                 ),
             )
 
