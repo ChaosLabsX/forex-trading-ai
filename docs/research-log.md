@@ -26,10 +26,27 @@ history per instrument. Not one produced an edge that survives retail costs.
 
 ### 1. Costs are the whole story, and they are not fixable
 
-`range_fade_v1` produced **+264.78R gross** across 6,033 trades - a real,
-measurable inefficiency. Costs then took **425.55R** of it, landing at −160.77R
-net. The signal has genuine predictive value and is too small to be worth a
-retail spread and commission.
+`range_fade_v1` produced **+263.91R gross** across 6,033 trades. Measured, not
+inferred: **gross expectancy +0.044R/trade, bootstrap 95% CI [+0.013, +0.074] →
+signal POSITIVE.** The strategy genuinely predicts price. Costs then took 456.67R
+of it: **net -0.032R/trade, CI [-0.063, -0.001] → negative.** The inefficiency is
+real and smaller than the toll to reach it. The gap is **0.029R**.
+
+**Two caveats that cut against reading this as encouragement:**
+
+- **It is not stable across time.** First half gross +0.031R, CI [-0.013,
+  +0.075] - *not* significant. Second half +0.057R, CI [+0.013, +0.101] -
+  significant. The full-sample result is carried by the recent half, so the edge
+  may be regime-dependent or fading rather than a permanent feature.
+- **Closing the gap barely helps.** Commission $7 → $4 (IBKR at 1 lot, or a
+  volume tier) reaches roughly break-even, not profit. Futures-grade cost
+  (~$2/round-turn ≈ 0.030R) would yield ~+0.014R/trade - but the edge was
+  measured on FX, and there is no evidence it exists in the instruments where
+  those costs live. Chasing it there is a new research project, not a port.
+
+Per-symbol gross results are noise: USDCHF shows GROSS +0.140R, CI [+0.025,
++0.255] POSITIVE - 1 significant result in 16 tests, where chance alone yields
+~0.8. Do not build on it.
 
 This is not a bug to fix or a parameter to tune. It is the seat at the table.
 Every strategy here shows the same shape: gross hovering around zero, net
