@@ -84,6 +84,8 @@ class SymbolCosts:
 
     spread_price: float  # current spread expressed in price units
     value_per_price_per_lot: float  # account-currency value of a 1.0 price move, 1.0 lot
+    min_stop_price: float  # broker's own minimum stop distance, in price units
+    point: float
     available: bool  # False if symbol_info was missing - costs then default to spread only
 
 
@@ -98,21 +100,50 @@ class TradeOutcome:
     result: str  # "win" | "loss" | "timeout"
     gross_r: float  # R before costs
     net_r: float  # R after spread + commission
+    cost_r: float  # what costs took, so the model stays auditable
+    risk_price: float
 
 
 def resolve_costs(symbol: str) -> SymbolCosts:
     info = mt5.symbol_info(symbol)
     if info is None:
         print(f"  WARNING: symbol_info({symbol}) is None - costs will be ignored for it")
-        return SymbolCosts(spread_price=0.0, value_per_price_per_lot=0.0, available=False)
+        return SymbolCosts(0.0, 0.0, 0.0, 0.0, False)
+    if not info.select:
+        # Dynamic fields are only trustworthy once the symbol is in Market Watch.
+        mt5.symbol_select(symbol, True)
+        info = mt5.symbol_info(symbol) or info
     spread_price = info.spread * info.point  # info.spread is a point count (snapshot)
     tick_size = info.trade_tick_size or info.point
     value_per_price = (info.trade_tick_value / tick_size) if tick_size else 0.0
     return SymbolCosts(
         spread_price=spread_price,
         value_per_price_per_lot=value_per_price,
+        min_stop_price=info.trade_stops_level * info.point,
+        point=info.point,
         available=True,
     )
+
+
+def min_tradeable_stop(costs: SymbolCosts) -> float:
+    """Smallest stop distance that could exist as a real order.
+
+    This is the fix for a silent disaster: cost_in_r is 7/(risk x value), a
+    hyperbola, so as the stop shrinks toward zero the modelled cost explodes
+    toward infinity. During dead holiday sessions ATR collapses to a fraction of
+    a pip, and an ATR-multiple stop collapses with it - producing "trades"
+    costing tens of R that swamp every honest trade in the average.
+
+    Those trades are fiction: MT5 rejects a stop inside trade_stops_level, and
+    no one trades a stop narrower than the spread. Skipping them is FAITHFUL to
+    what could actually have been executed, not data cleaning to flatter the
+    result."""
+    floor = max(
+        costs.min_stop_price,        # the broker's own rule
+        costs.spread_price * 2.0,    # a stop inside the spread is not a trade
+        costs.point * 10.0,          # ~1 pip on a 5-digit FX pair
+    )
+    return floor
 
 
 def cost_in_r(costs: SymbolCosts, risk_price: float) -> float:
@@ -171,6 +202,8 @@ def run_backtest_for_symbol(
 
     outcomes: list[TradeOutcome] = []
     last_signal_index = -(10**9)
+    floor = min_tradeable_stop(costs)
+    untradeable = 0
 
     # stop at len-2: a signal on bar i needs bar i+1 to exist to fill the entry
     for i in range(H1_WINDOW, len(h1_all) - 2):
@@ -202,13 +235,17 @@ def run_backtest_for_symbol(
         # honest, keeping the strategy's own stop/target levels.
         entry_fill = h1_all[i + 1].open
         risk_price = abs(entry_fill - signal.stop_loss)
-        if risk_price <= 0:
+        # A stop this tight could never have been placed (broker stops-level,
+        # or narrower than the spread). Counting it would let 1/risk blow the
+        # cost model up and swamp every real trade.
+        if risk_price < floor:
+            untradeable += 1
             continue
 
         result, gross_r = simulate_outcome(
             signal.direction, entry_fill, signal.stop_loss, signal.take_profit, h1_all[i + 2 :]
         )
-        net_r = gross_r - cost_in_r(costs, risk_price)
+        cost_r = cost_in_r(costs, risk_price)
         outcomes.append(
             TradeOutcome(
                 symbol=symbol,
@@ -219,8 +256,15 @@ def run_backtest_for_symbol(
                 take_profit=signal.take_profit,
                 result=result,
                 gross_r=gross_r,
-                net_r=net_r,
+                net_r=gross_r - cost_r,
+                cost_r=cost_r,
+                risk_price=risk_price,
             )
+        )
+    if untradeable:
+        print(
+            f"  ({symbol}: skipped {untradeable} signals whose stop was below the "
+            f"tradeable floor {floor:.5f} - they could not have been orders)"
         )
     return outcomes
 
@@ -260,6 +304,14 @@ def summarize(label: str, outcomes: list[TradeOutcome]) -> None:
     print(f"  expectancy       {expectancy:+.3f} R/trade")
     print(f"  avg win / loss   {avg_win:+.2f}R / {avg_loss:+.2f}R")
     print(f"  profit factor    {profit_factor:.2f}")
+    # Costs shown as a distribution, not just a total: an average hides the
+    # 1/risk tail that wrecked the first run, and a median wildly out of line
+    # with ~0.05R means the model is lying again.
+    cost_rs = sorted(o.cost_r for o in outcomes)
+    if cost_rs:
+        med = cost_rs[len(cost_rs) // 2]
+        p95 = cost_rs[min(int(0.95 * len(cost_rs)), len(cost_rs) - 1)]
+        print(f"  cost per trade   median {med:.3f}R  p95 {p95:.3f}R  max {cost_rs[-1]:.3f}R")
     print(f"  max drawdown     {max_drawdown_r(net_rs):.2f}R")
     print(f"  longest losing   {longest_losing_streak(net_rs)} in a row")
     print(f"  expectancy 95%CI [{lo:+.3f}, {hi:+.3f}] R/trade  -> edge {edge}")
@@ -287,6 +339,20 @@ def main() -> None:
     broker = MT5BrokerAdapter(settings)
     broker.connect()  # blank MT5_LOGIN -> read-only attach, no session bump
     md = MT5MarketDataProvider(settings)
+
+    # resolve_costs() takes ONE live spread snapshot and applies it to years of
+    # trades. If the market is shut, bid==ask and that snapshot reads zero -
+    # which silently understates cost. Say so rather than quietly flattering the
+    # result.
+    probe = mt5.symbol_info_tick("EURUSD")
+    if probe is not None and probe.ask - probe.bid <= 0:
+        print(
+            "WARNING: EURUSD bid == ask - the market looks closed, so the spread\n"
+            "         snapshot reads ~zero and SPREAD cost is UNDERSTATED here.\n"
+            "         Commission still applies. Re-run during market hours for the\n"
+            "         full picture; a strategy that loses on commission alone is\n"
+            "         already answered.\n"
+        )
 
     print(f"Backtesting '{strategy.name}' over {len(strategy.instruments)} instrument(s)\n")
     all_outcomes: list[TradeOutcome] = []
