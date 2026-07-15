@@ -12,14 +12,22 @@ src/
   lib/
     supabase.ts          creates the Supabase client from VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY
     useAuth.ts            hook: current session, signIn, signOut
-    useDashboardData.ts   ONE polling loop (15s) for heartbeat + trades + signals
+    useDashboardData.ts   ONE polling loop (15s); derives per-account health once,
+                          so no component re-invents the staleness/paused rule
+    useStrategyLab.ts     registries + latest evaluation per (strategy, account)
     format.ts             date/money/relative-time formatting helpers
   components/
     Login.tsx            the full-page gate - the only thing a signed-out visitor sees
     Dashboard.tsx        signed-in layout: topbar, paused banner, stat tiles, sections, account settings
-    StatTiles.tsx        KPI row: engine LIVE/PAUSED/OFFLINE, open trades, total P&L, win rate
+    StatTiles.tsx        KPI row: engines, open trades, total P&L, win rate
+    AccountFilter.tsx    scope selector - deliberately NO "All": summing demo play
+                         money with real money is a figure you cannot trust
+    StrategyLab.tsx      ranked verdicts, readiness counts, per-account toggles
+    StrategyReport.tsx   per-strategy deep view: metrics, equity curve, CI-vs-zero bar
+    Engines.tsx          one card per account: status + its own controls
     PausedBanner.tsx     loud full-width alert + one-click resume, shown only while paused
-    Controls.tsx         pause/resume/emergency-close-all
+    Controls.tsx         pause/resume/emergency-close-all, TARGETED at one account -
+                         an untargeted command silently hits whichever engine defaults to it
     OpenTrades.tsx       trades where status=OPEN
     TradeHistory.tsx     trades where status=CLOSED
     SignalsFeed.tsx      recent signals, joined with ai_reviews (rationale in a disclosure)

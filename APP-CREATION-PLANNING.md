@@ -406,3 +406,18 @@ The engine now runs 24/7 on the VPS independent of the local laptop; the local
 setup remains for development only and must never run concurrently against the
 same account. Phases 0-6 are now all built and live-verified - the original
 roadmap is complete.*
+
+**Beyond the roadmap (2026-07-15): the project became a research platform.** The
+original plan assumed a strategy would work and the job was to run it safely.
+That assumption was wrong, and the system was rebuilt around finding out. Added:
+a registry-driven strategy laboratory (`docs/strategy-lab.md`), a cost-aware
+backtest that screens any strategy against years of history in ~2 minutes, an
+evaluator that grants READY only on a bootstrap 95% CI entirely above zero, and
+four independent guards on live trading (`docs/going-live.md`).
+
+**The verdict so far is no.** Six strategies, ~37k simulated trades, up to 12.7
+years: no edge that survives retail costs. `range_fade_v1` has a *real* gross
+edge (+0.044R/trade, CI [+0.013,+0.074]) that its 0.066R costs consume - and it
+exists only at the timescale where that is true, which is why it still exists at
+all. Full record in `docs/research-log.md`. Live remains off; the user waits for
+a READY alert that may never come, which is the system working.*
