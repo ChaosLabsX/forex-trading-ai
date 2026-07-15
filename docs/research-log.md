@@ -9,7 +9,7 @@ commission), entries filled at the next bar's open, and judged by a bootstrap
 
 ## Verdict so far: no demonstrated edge. Nothing is Ready.
 
-Five strategies, five mechanisms, ~31,000 simulated trades, 3-7 years of real
+Six strategies, five mechanisms, ~37,000 simulated trades, 3-12.7 years of real
 history per instrument. Not one produced an edge that survives retail costs.
 
 ## The strategies
@@ -21,6 +21,11 @@ history per instrument. Not one produced an edge that survives retail costs.
 | `range_fade_v1` | Mean reversion, ADX < 20 | 6,033 | −0.027R | zero |
 | `donchian_breakout_v1` | 20-bar price-channel momentum, FX | 15,024 | −0.090R | **negative** |
 | `donchian_trending_v1` | Same logic, trending assets | 8,856 | −0.122R | **negative** |
+| `range_fade_h4_v1` | Same logic as `range_fade_v1`, at H4 | 5,715 | −0.042R | **negative** |
+
+Six strategies, five mechanisms: `range_fade_h4_v1` and `donchian_trending_v1`
+are not new ideas, they are the *same* mechanism aimed at unseen data - which is
+the only kind of variant this log permits (see the standing rule at the bottom).
 
 ## The two findings that actually matter
 
@@ -116,7 +121,17 @@ function object), only the timeframes moved. **The prediction split in two:**
 | **Gross / trade** | **+0.044R** | **-0.008R** - gone |
 
 Net -0.042R, CI [-0.074, -0.010] → **negative**, over **12.7 years** (H4 history
-reaches 2013 - a *longer* sample than the H1 run) and negative in both halves.
+reaches 2013 - a *longer* sample than the H1 run), across 5,715 trades.
+
+An earlier version of this section claimed the H4 result was "negative in both
+halves". **That was wrong**, and two independent re-runs say so: the first half
+is negative (CI [-0.102, -0.009]) but the second half straddles zero (CI
+[-0.072, +0.017]) - i.e. *not* distinguishable from zero, not negative. The
+verdict is unchanged, because it never rested on the halves: the full-sample net
+CI is entirely below zero and the full-sample **gross** CI [-0.039, +0.025]
+contains zero, which is the actual finding. Corrected rather than quietly
+dropped - a log that overstates in the pessimistic direction is still a log that
+overstates.
 
 **The cost model is trustworthy. Scale-invariance was wrong.** The edge lives at
 one hour and is absent at four.

@@ -1,11 +1,10 @@
 import { Fragment, useState } from "react";
-import type { Readiness, StrategyEvaluation } from "../types";
+import type { Account, Readiness, Strategy, StrategyAccount, StrategyEvaluation, Trade } from "../types";
 import {
   latestEvaluation,
   linkFor,
-  setLiveOverride,
+  rankStrategies,
   setStrategyEnabled,
-  useStrategyLab,
 } from "../lib/useStrategyLab";
 import { StrategyReport } from "./StrategyReport";
 
@@ -19,47 +18,33 @@ const VERDICT_CLASS: Record<Readiness, string> = {
   almost_ready: "badge-almost",
   not_ready: "badge-notready",
 };
-const RANK: Record<Readiness, number> = { ready: 2, almost_ready: 1, not_ready: 0 };
 
 function fmt(value: number | null | undefined, digits = 2, suffix = "") {
   return value === null || value === undefined ? "—" : `${value.toFixed(digits)}${suffix}`;
 }
 
-/** Ranking: readiness first, then how strong the *proven* edge is (CI lower
- * bound - the honest measure, not the flattering point estimate), then sample
- * size as the tiebreak. */
-function rankScore(evaluation: StrategyEvaluation | null, readiness: Readiness): number[] {
-  return [
-    RANK[readiness] ?? 0,
-    evaluation?.ci_low ?? -99,
-    evaluation?.expectancy_r ?? -99,
-    evaluation?.trades_count ?? 0,
-  ];
-}
+type Props = {
+  accounts: Account[];
+  strategies: Strategy[];
+  links: StrategyAccount[];
+  evaluations: StrategyEvaluation[];
+  closedTrades: Trade[];
+  refresh: () => Promise<void>;
+};
 
-export function StrategyLab() {
-  const { accounts, strategies, links, evaluations, closedTrades, loading, refresh } =
-    useStrategyLab();
+export function StrategyLab({ accounts, strategies, links, evaluations, closedTrades, refresh }: Props) {
   const [selected, setSelected] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
 
   const labAccount = accounts.find((a) => a.account_type === "demo") ?? null;
   const liveAccount = accounts.find((a) => a.account_type === "live") ?? null;
 
-  if (loading) return <section className="section"><div className="card">Loading strategies…</div></section>;
-
   const active = strategies.filter((s) => !s.retired);
-  const ranked = [...active].sort((a, b) => {
-    const sa = rankScore(labAccount ? latestEvaluation(evaluations, a.name, labAccount.key) : null, a.readiness);
-    const sb = rankScore(labAccount ? latestEvaluation(evaluations, b.name, labAccount.key) : null, b.readiness);
-    for (let i = 0; i < sa.length; i++) if (sb[i] !== sa[i]) return sb[i] - sa[i];
-    return a.name.localeCompare(b.name);
-  });
+  const ranked = labAccount ? rankStrategies(active, evaluations, labAccount.key) : active;
 
-  async function toggle(id: number, next: boolean, live: boolean) {
+  async function toggle(id: number, next: boolean) {
     setBusy(id);
-    if (live) await setLiveOverride(id, next);
-    else await setStrategyEnabled(id, next);
+    await setStrategyEnabled(id, next);
     await refresh();
     setBusy(null);
   }
@@ -115,6 +100,7 @@ export function StrategyLab() {
               <th>95% CI</th>
               <th>PF</th>
               <th>Max DD</th>
+              <th>What it still needs</th>
               <th>Demo</th>
               <th>Live</th>
             </tr>
@@ -155,6 +141,13 @@ export function StrategyLab() {
                     <td className="cell-num" data-label="Max DD">
                       {fmt(evaluation?.max_drawdown_r, 1, "R")}
                     </td>
+                    {/* The evaluator's own words. verdict_reason is rewritten every
+                        snapshot, unlike strategies.readiness_reason which is only
+                        rewritten when the verdict CHANGES - so this is the only
+                        field that answers "what is blocking it right now". */}
+                    <td className="cell-reason cell-wide" data-label="What it still needs">
+                      {evaluation?.verdict_reason ?? "Not evaluated yet"}
+                    </td>
                     <td data-label="Demo" onClick={(e) => e.stopPropagation()}>
                       {demoLink ? (
                         <label className="switch">
@@ -162,7 +155,7 @@ export function StrategyLab() {
                             type="checkbox"
                             checked={demoLink.enabled}
                             disabled={busy === demoLink.id}
-                            onChange={(e) => toggle(demoLink.id, e.target.checked, false)}
+                            onChange={(e) => toggle(demoLink.id, e.target.checked)}
                           />
                           <span>{demoLink.enabled ? "on" : "off"}</span>
                         </label>
@@ -177,7 +170,7 @@ export function StrategyLab() {
                             type="checkbox"
                             checked={liveLink.enabled}
                             disabled={busy === liveLink.id}
-                            onChange={(e) => toggle(liveLink.id, e.target.checked, false)}
+                            onChange={(e) => toggle(liveLink.id, e.target.checked)}
                           />
                           <span>
                             {liveLink.enabled
@@ -194,7 +187,7 @@ export function StrategyLab() {
                   </tr>
                   {open && (
                     <tr className="report-row">
-                      <td colSpan={10} className="report-cell">
+                      <td colSpan={11} className="report-cell">
                         <StrategyReport
                           strategy={strategy}
                           accounts={accounts}

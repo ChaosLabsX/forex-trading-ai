@@ -1,20 +1,19 @@
-import type { Trade } from "../types";
+import type { Trade, Strategy, StrategyEvaluation } from "../types";
 import type { AccountHealth } from "../lib/useDashboardData";
-import { fmtMoney } from "../lib/format";
+import { latestEvaluation, rankStrategies } from "../lib/useStrategyLab";
 
 type Props = {
   health: AccountHealth[];
   openTrades: Trade[];
-  closedTrades: Trade[];
+  strategies: Strategy[];
+  evaluations: StrategyEvaluation[];
+  /** Always the DEMO lab, never the filtered account: verdicts derive from the
+   * lab by definition, so these tiles must not change meaning when the account
+   * filter moves. */
+  labAccountKey: string | null;
 };
 
-export function StatTiles({ health, openTrades, closedTrades }: Props) {
-  const withPnl = closedTrades.filter((t) => t.realized_pnl !== null);
-  const wins = withPnl.filter((t) => (t.realized_pnl ?? 0) > 0).length;
-  const losses = withPnl.length - wins;
-  const totalPnl = withPnl.reduce((sum, t) => sum + (t.realized_pnl ?? 0), 0);
-  const winRate = withPnl.length ? Math.round((wins / withPnl.length) * 100) : null;
-
+export function StatTiles({ health, openTrades, strategies, evaluations, labAccountKey }: Props) {
   // Headline the engines that are meant to be running; per-account detail lives
   // in the Accounts section.
   const expected = health.filter((h) => h.account.enabled);
@@ -45,6 +44,31 @@ export function StatTiles({ health, openTrades, closedTrades }: Props) {
         : `${online.length}/${expected.length} engines running`;
   }
 
+  const active = strategies.filter((s) => !s.retired);
+  const leader = labAccountKey ? rankStrategies(active, evaluations, labAccountKey)[0] ?? null : null;
+  const leaderEval =
+    leader && labAccountKey ? latestEvaluation(evaluations, leader.name, labAccountKey) : null;
+  const readyCount = active.filter((s) => s.readiness === "ready").length;
+
+  const expectancy = leaderEval?.expectancy_r;
+  const ciLow = leaderEval?.ci_low;
+  const ciHigh = leaderEval?.ci_high;
+  // The CI is the test, not the point estimate - so the interval is never
+  // rendered without saying what it means.
+  const ciSub =
+    ciLow != null && ciHigh != null
+      ? `95% CI [${ciLow.toFixed(3)}, ${ciHigh.toFixed(3)}] · ${
+          ciLow > 0 ? "proven above zero" : "still includes zero"
+        }`
+      : leaderEval
+        ? "CI unavailable - too few trades"
+        : "No evaluation yet";
+
+  // The evaluator rewrites verdict_reason on EVERY snapshot; strategies.readiness_reason
+  // is only rewritten when the verdict actually changes, so it goes stale between
+  // changes. For "what is blocking this right now", the snapshot is the honest source.
+  const blocker = leaderEval?.verdict_reason ?? "The lab has not evaluated this strategy yet";
+
   return (
     <div className="tiles">
       <div className="tile">
@@ -67,23 +91,27 @@ export function StatTiles({ health, openTrades, closedTrades }: Props) {
       </div>
 
       <div className="tile">
-        <div className="tile-label">Total P&amp;L</div>
-        <div className={`tile-value ${totalPnl > 0 ? "pnl-pos" : totalPnl < 0 ? "pnl-neg" : ""}`}>
-          {fmtMoney(totalPnl)}
+        <div className="tile-label">Best expectancy</div>
+        <div
+          className={`tile-value ${
+            ciLow != null && ciLow > 0 ? "pnl-pos" : expectancy != null && expectancy < 0 ? "pnl-neg" : ""
+          }`}
+        >
+          {expectancy != null ? `${expectancy.toFixed(3)}R` : "—"}
         </div>
-        <div className="tile-sub">
-          {withPnl.length > 0
-            ? `Across ${withPnl.length} closed trade${withPnl.length === 1 ? "" : "s"}`
-            : "No closed trades yet"}
-        </div>
+        <div className="tile-sub">{ciSub}</div>
       </div>
 
       <div className="tile">
-        <div className="tile-label">Win rate</div>
-        <div className="tile-value">{winRate !== null ? `${winRate}%` : "—"}</div>
-        <div className="tile-sub">
-          {withPnl.length > 0 ? `${wins} won · ${losses} lost` : "No closed trades yet"}
+        <div className="tile-label">Closest to READY</div>
+        <div className="tile-value">
+          {readyCount > 0
+            ? `${readyCount} READY`
+            : leader
+              ? leader.display_name || leader.name
+              : "—"}
         </div>
+        <div className="tile-sub">{leader ? blocker : "No strategies registered"}</div>
       </div>
     </div>
   );

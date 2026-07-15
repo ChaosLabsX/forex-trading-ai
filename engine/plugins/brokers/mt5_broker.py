@@ -23,11 +23,20 @@ class MT5ConnectionError(RuntimeError):
 class MT5BrokerAdapter(BrokerAdapter):
     """Talks to a locally-running, logged-in MT5 terminal via the MetaTrader5
     IPC package. If MT5_LOGIN/PASSWORD/TERMINAL_PATH aren't set, attaches to
-    whatever terminal is already open and logged in instead."""
+    whatever terminal is already open and logged in instead.
+
+    Either way the adapter binds to exactly ONE account and refuses to follow the
+    terminal anywhere else - the bridge otherwise tracks the terminal silently,
+    which is how 31 orders got refused as NO_MONEY on a funded account. See
+    _bind_account() and docs/safety-rails.md."""
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
         self._server_utc_offset_seconds: float = 0.0
+        # The account this adapter is bound to. Set from MT5_LOGIN when one is
+        # configured; otherwise captured from the terminal on the FIRST connect
+        # and never rewritten - see _bind_account().
+        self._bound_login: int | None = None
 
     def connect(self) -> None:
         kwargs: dict = {}
@@ -42,10 +51,91 @@ class MT5BrokerAdapter(BrokerAdapter):
             code, message = mt5.last_error()
             raise MT5ConnectionError(f"mt5.initialize() failed: [{code}] {message}")
 
+        info = mt5.account_info()
+        if info is None:
+            code, message = mt5.last_error()
+            raise MT5ConnectionError(f"account_info() returned None right after initialize(): [{code}] {message}")
+
+        terminal = mt5.terminal_info()
+        terminal_path = getattr(terminal, "path", "unknown") if terminal else "unknown"
+        # Always say which terminal and account we actually landed on. With two
+        # terminals installed this is the difference between "the demo lab" and
+        # "real money", and it was previously invisible.
+        logger.info(
+            "attached: account %s (%s) via %s", info.login, info.server, terminal_path
+        )
+        self._verify_server(info.server, terminal_path)
+        self._bind_account(info.login)
+
         # MT5 timestamps are in the broker's server time, not UTC (confirmed:
         # ~3h offset on this account) - measured fresh on every (re)connect so
         # DST transitions don't need a code change.
         self._server_utc_offset_seconds = measure_server_utc_offset_seconds()
+
+    def _verify_server(self, actual_server: str, terminal_path: str) -> None:
+        """Refuse to run against the wrong broker server.
+
+        This closes a real hole. `_bind_account()` only pins the LOGIN, and with
+        MT5_LOGIN empty (attach-to-open-terminal mode) whatever account it first
+        attaches to becomes "correct" by definition. Meanwhile an empty
+        MT5_TERMINAL_PATH lets mt5.initialize() attach to whichever terminal
+        Windows offers - fine with one terminal installed, dangerous the moment a
+        second exists.
+
+        So the demo engine, running TEST_MODE=true (real 0.01-lot orders), could
+        attach to the LIVE terminal, bind to the live account as though intended,
+        and trade real money while tagging every alert DEMO. Nothing would notice.
+
+        MT5_SERVER is already configured and costs nothing to check, and the two
+        servers differ (ICMarketsSC-Demo vs ICMarketsSC-MT5-3), so it catches
+        exactly this. Pinning MT5_TERMINAL_PATH prevents the mix-up; this refuses
+        to trade if it happens anyway."""
+        expected = self._settings.mt5_server
+        if not expected:
+            logger.warning(
+                "MT5_SERVER is not set - cannot verify which broker server this "
+                "terminal is on. Set it, especially with more than one terminal installed."
+            )
+            return
+        if actual_server != expected:
+            raise MT5ConnectionError(
+                f"attached to server '{actual_server}' but MT5_SERVER expects '{expected}' "
+                f"- refusing to trade. Terminal: {terminal_path}. "
+                f"Set MT5_TERMINAL_PATH to pin this engine to its own terminal."
+            )
+
+    def _bind_account(self, actual: int) -> None:
+        """Decide - once - which account this adapter owns, and refuse to move.
+
+        With MT5_LOGIN set, initialize(login=) should have logged us in, but it
+        can report success without the login taking effect, so it is checked
+        rather than trusted.
+
+        With MT5_LOGIN empty (attach-to-open-terminal mode) there is nothing to
+        check against, so the first account we attach to becomes the binding and
+        any later change is treated as a fault. That is deliberate: without
+        credentials the adapter cannot log back in, so drifting to another
+        account is not something it can repair - only refuse.
+        """
+        expected = self._expected_login()
+        if expected is not None and actual != expected:
+            raise MT5ConnectionError(
+                f"terminal is logged into account {actual}, expected {expected} - refusing to trade"
+            )
+        if self._bound_login is None:
+            self._bound_login = actual
+        elif actual != self._bound_login:
+            raise MT5ConnectionError(
+                f"terminal moved to account {actual}; this engine is bound to {self._bound_login} "
+                f"- refusing to trade (set MT5_LOGIN/MT5_PASSWORD so it can log back in)"
+            )
+
+    def _expected_login(self) -> int | None:
+        """The account MT5_LOGIN pins us to, or None in attach-to-open-terminal
+        mode, where nothing was configured to hold the terminal to."""
+        if not self._settings.mt5_login:
+            return None
+        return int(self._settings.mt5_login)
 
     def _to_utc(self, epoch_seconds: float) -> datetime:
         return server_epoch_to_utc(epoch_seconds, self._server_utc_offset_seconds)
@@ -54,7 +144,34 @@ class MT5BrokerAdapter(BrokerAdapter):
         mt5.shutdown()
 
     def is_connected(self) -> bool:
-        return mt5.terminal_info() is not None
+        """Usable for trading OUR account right now - not merely "MT5.exe is running".
+
+        Three different things break orders here, and the old check
+        (`terminal_info() is not None`) could see none of them:
+
+          * the terminal process is gone;
+          * the terminal is up but has no trade-server link - terminal_info()
+            still returns a struct in that state, so the object's existence
+            proves nothing. `.connected` is the field that answers the question;
+          * the terminal is logged into a DIFFERENT account. initialize(login=)
+            runs once at connect; afterwards the IPC bridge silently follows the
+            terminal wherever it is pointed.
+
+        The last one cost two hours live on 2026-07-15: 31 orders refused as
+        NO_MONEY while the intended account held $10M, because MT5 was not
+        looking at that account - and every health check said "connected".
+
+        Returning False is also the repair: the loop's reconnect path calls
+        connect(), which re-runs initialize(login=) and logs back in.
+        """
+        info = mt5.terminal_info()
+        if info is None or not info.connected:
+            return False
+
+        if self._bound_login is None:
+            return True  # never connected yet - nothing to compare against
+        account = mt5.account_info()
+        return account is not None and account.login == self._bound_login
 
     def get_account_state(self) -> AccountState:
         info = mt5.account_info()

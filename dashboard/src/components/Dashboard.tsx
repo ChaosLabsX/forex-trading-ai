@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useAuth } from "../lib/useAuth";
 import { useDashboardData } from "../lib/useDashboardData";
+import { useStrategyLab } from "../lib/useStrategyLab";
 import { StatTiles } from "./StatTiles";
 import { PausedBanner } from "./PausedBanner";
 import { AccountFilter } from "./AccountFilter";
@@ -17,7 +18,17 @@ const logoUrl = `${import.meta.env.BASE_URL}pwa-192x192.png`;
 export function Dashboard({ session }: { session: Session }) {
   const { signOut } = useAuth();
   const { accounts, health, openTrades, closedTrades, signals, loading } = useDashboardData();
+  // Lifted so the tiles and the lab table read ONE fetch and can never disagree
+  // about which strategy is leading or why it isn't Ready.
+  const lab = useStrategyLab();
   const [selected, setSelected] = useState<string | null>(null);
+
+  // Verdicts derive from the demo lab by definition, so the readiness tiles are
+  // pinned to it and do not follow the account filter.
+  const labAccountKey = useMemo(
+    () => lab.accounts.find((a) => a.account_type === "demo")?.key ?? null,
+    [lab.accounts]
+  );
 
   // Default to the live account once it's actually in service - that's the one
   // that matters when real money is on the line. Falls back to the demo lab.
@@ -54,7 +65,7 @@ export function Dashboard({ session }: { session: Session }) {
         </button>
       </header>
 
-      {loading ? (
+      {loading || lab.loading ? (
         <div className="gate">
           <div className="spinner" aria-label="Loading" />
         </div>
@@ -63,8 +74,21 @@ export function Dashboard({ session }: { session: Session }) {
           {/* Pause is engine state, not account scope - never hide it behind a filter. */}
           <PausedBanner session={session} paused={health.filter((h) => h.paused)} />
           <AccountFilter accounts={accounts} selected={activeKey} onSelect={setSelected} />
-          <StatTiles health={scoped.health} openTrades={scoped.open} closedTrades={scoped.closed} />
-          <StrategyLab />
+          <StatTiles
+            health={scoped.health}
+            openTrades={scoped.open}
+            strategies={lab.strategies}
+            evaluations={lab.evaluations}
+            labAccountKey={labAccountKey}
+          />
+          <StrategyLab
+            accounts={lab.accounts}
+            strategies={lab.strategies}
+            links={lab.links}
+            evaluations={lab.evaluations}
+            closedTrades={lab.closedTrades}
+            refresh={lab.refresh}
+          />
           <Engines session={session} health={health} />
           <OpenTrades trades={scoped.open} />
           <TradeHistory trades={scoped.closed} />

@@ -82,6 +82,16 @@ never become an outsized bet.
    logged into the real account, plus the second engine. See step 6 of
    [`infra/vps-setup.md`](../infra/vps-setup.md). Do this while still blocked -
    it proves the plumbing with nothing at stake.
+
+   > **Pin both engines to their own terminal and account first.** If
+   > `MT5_TERMINAL_PATH` is empty, `mt5.initialize()` attaches to whichever
+   > terminal Windows offers - so the moment a second terminal exists, the
+   > *demo* engine can attach to the *live* one and place `TEST_MODE=true`
+   > micro-lot orders on real money while still calling itself the demo lab.
+   > `run-live-engine.ps1` pins the live engine's path; the demo engine's `.env`
+   > must pin its own. Set `MT5_LOGIN`/`MT5_PASSWORD` for both as well, or the
+   > engine cannot verify - or recover - which account it is on. See
+   > [`safety-rails.md`](safety-rails.md).
 3. **Set the risk** for that strategy on the live account. Start at the smallest
    thing that can trade. In Supabase: `strategy_accounts.risk_pct` for
    (strategy, `icmarkets-live`).

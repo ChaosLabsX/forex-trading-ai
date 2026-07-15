@@ -117,6 +117,59 @@ direction + lot size at the *same* moment, this could misattribute which
 signal a recovered position belongs to. Not a concern at today's scale (one
 strategy, sequential evaluation), worth revisiting if that changes.
 
+## "Connected" meant "MT5.exe is running" - and the engine never checked which account it was on
+
+Found live on **2026-07-15**: 31 orders in a row refused by MT5 with retcode
+**10019 (NO_MONEY)** on a demo account holding **$10,000,046 in free margin**,
+placing 0.01 lots needing ~$18. NO_MONEY was not a lie about the balance - MT5
+was simply not looking at the account we thought it was.
+
+Two independent defects combined:
+
+1. **`is_connected()` returned `mt5.terminal_info() is not None`.**
+   `terminal_info()` returns a struct whenever the terminal *process* is
+   reachable; its `.connected` field is what reports the trade-server link, and
+   the check ignored it. Every heartbeat therefore recorded
+   `broker_connected: true` throughout the outage. The health signal could not
+   observe the thing it claimed to observe.
+2. **Nothing verified the terminal's account.** `connect()` calls
+   `mt5.initialize(login=...)` **once**; afterwards the IPC bridge silently
+   follows the terminal wherever it is pointed. With `MT5_LOGIN` empty (the
+   documented attach-to-open-terminal mode) it never logs in at all - it
+   inherits whatever account the terminal happens to be on, and cannot log back
+   in, because it has no credentials.
+
+The engine was paused 15:07-16:47 UTC, which only *hid* the onset - a paused
+engine sends no orders. Failures began 7 seconds after the resume and continued
+for two hours until the process died; the restart re-attached and "fixed" it.
+Nothing alerted, because by every check the engine had, it was healthy.
+
+**Fixed in `MT5BrokerAdapter`:**
+
+- `is_connected()` now requires `terminal_info().connected` **and** that the
+  terminal is still on the bound account.
+- `connect()` reads `account_info()` and calls `_bind_account()`, which pins the
+  adapter to one account: `MT5_LOGIN` when set, otherwise the account seen on
+  the first connect. Any later move raises rather than trading on.
+
+Returning `False` is also the repair: `EngineLoop._ensure_connected()` already
+alerts and calls `connect()`, which re-runs `initialize(login=...)`. That path
+existed the whole time and never fired because nothing could detect the fault.
+
+**This only fully works if `MT5_LOGIN`/`MT5_PASSWORD` are set.** Without them the
+adapter can detect drift and refuse, but cannot log back in - it will alert and
+stay down until a human fixes the terminal. That is the correct failure, not a
+good one.
+
+**Read this before installing the live terminal.** `MT5_TERMINAL_PATH` is also
+empty for the demo engine, so a bare `mt5.initialize()` attaches to whichever
+terminal Windows offers. `infra/run-live-engine.ps1` pins the path for the
+*live* engine, but the *demo* engine has no such pin - so once a second terminal
+exists, the demo engine can attach to the **live** terminal. Its `ACCOUNT_KEY`
+would still say `icmarkets-demo`, so `gating.py` would clear it as the demo
+account and place `TEST_MODE=true` micro-lot orders on real money. Pin
+`MT5_TERMINAL_PATH` for both engines before step 2 of `going-live.md`.
+
 ## TLS is verified against the OS trust store, not OpenSSL's bundle
 
 Found live during Phase 6 VPS bring-up: the engine ran fine, MT5 connected,
@@ -170,6 +223,39 @@ properties worth stating explicitly:
   Never unsafe (the stop is still never loosened), just occasionally leaves gain
   on the table. MT5 continues enforcing whatever stop is set even while the
   engine is down.
+
+## Two terminals: pin each engine, and verify where it landed
+
+With a demo and a live MT5 terminal installed on the same box, **an empty
+`MT5_TERMINAL_PATH` is dangerous**. `mt5.initialize()` with no path attaches to
+whichever terminal Windows offers - harmless with one installed, a live-money
+incident with two.
+
+The failure it enables: the **demo** engine runs `TEST_MODE=true`, which places
+real 0.01-lot orders. Attached to the **live** terminal it would trade real money
+while tagging every alert `DEMO`. And `_bind_account()` would not save you -
+with `MT5_LOGIN` empty, the first account it attaches to becomes "correct" by
+definition.
+
+Two things prevent it:
+
+1. **Pin `MT5_TERMINAL_PATH`** in each engine's environment. The live engine
+   already does this (`infra/run-live-engine.ps1`); the demo engine's `.env`
+   must too.
+2. **`MT5BrokerAdapter._verify_server()`** refuses to trade when
+   `account_info().server` doesn't match `MT5_SERVER`. The servers differ
+   (`ICMarketsSC-Demo` vs `ICMarketsSC-MT5-3`), so a mix-up raises instead of
+   trading. Every connect also logs the terminal path and account, so which
+   account an engine is on is never invisible again.
+
+Setting `MT5_LOGIN`/`MT5_PASSWORD` for both is stronger still: without
+credentials the adapter cannot log back in, so a terminal that drifts to another
+account can only be refused, not repaired.
+
+**Stopping a live engine:** `Stop-ScheduledTask` kills the `powershell.exe`
+wrapper but **not the `python.exe` it spawned**. Check for orphans with
+`Get-Process python` and confirm the log has stopped growing - a disabled task
+whose log is still being written is an orphaned engine, not a stopped one.
 
 ## Live trading is off behind four independent guards
 

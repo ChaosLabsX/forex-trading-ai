@@ -41,6 +41,28 @@ if (-not (Test-Path $TerminalPath)) {
     throw "Live MT5 terminal not found at '$TerminalPath'. Install a SECOND MT5 terminal for the live account and pass -TerminalPath, or edit the default in this script."
 }
 
+# The live engine must NOT inherit the DEMO account's credentials. Settings
+# reads .env for anything absent from the environment, and .env holds the demo
+# login - so without loading live credentials here, this process would tell the
+# LIVE terminal to log into the DEMO account and then label every trade
+# 'icmarkets-live'. .env.live is gitignored; see .env.live.example.
+$LiveEnv = Join-Path $RepoDir ".env.live"
+if (-not (Test-Path $LiveEnv)) {
+    throw "Missing '$LiveEnv'. Copy .env.live.example to .env.live and fill in the LIVE account's MT5_LOGIN / MT5_PASSWORD / MT5_SERVER. Without it this engine would inherit the demo account from .env."
+}
+Get-Content $LiveEnv | ForEach-Object {
+    $line = $_.Trim()
+    if ($line -and -not $line.StartsWith("#")) {
+        $key, $value = $line -split "=", 2
+        Set-Item -Path "Env:$($key.Trim())" -Value $value.Trim()
+    }
+}
+foreach ($required in @("MT5_LOGIN", "MT5_PASSWORD", "MT5_SERVER")) {
+    if (-not (Get-Item -Path "Env:$required" -ErrorAction SilentlyContinue).Value) {
+        throw "$required is empty in '$LiveEnv' - refusing to start. An unpinned live engine trades whatever account its terminal happens to be on."
+    }
+}
+
 $env:MT5_TERMINAL_PATH        = $TerminalPath
 $env:ACCOUNT_KEY              = "icmarkets-live"
 $env:TEST_MODE                = "false"   # real sizing, not the demo micro lot - NOT a guard

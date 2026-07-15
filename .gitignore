@@ -1,4 +1,8 @@
 .env
+# Live-account credentials, loaded by infra/run-live-engine.ps1. Listed
+# explicitly because the '.env' rule above matches that exact filename only -
+# it would NOT cover this. The .example files stay committed.
+.env.live
 .venv/
 __pycache__/
 *.pyc
