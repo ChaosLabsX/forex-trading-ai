@@ -19,6 +19,7 @@ PLUGIN_REGISTRY: dict[str, dict[str, str]] = {
         "london_breakout_v1": "engine.plugins.strategies.london_breakout_v1:LondonBreakoutStrategy",
         "range_fade_v1": "engine.plugins.strategies.range_fade_v1:RangeFadeStrategy",
         "donchian_breakout_v1": "engine.plugins.strategies.donchian_breakout_v1:DonchianBreakoutStrategy",
+        "donchian_trending_v1": "engine.plugins.strategies.donchian_trending_v1:DonchianTrendingStrategy",
     },
     "risk_engine": {
         "default": "engine.plugins.risk.default_risk_engine:DefaultRiskEngine",

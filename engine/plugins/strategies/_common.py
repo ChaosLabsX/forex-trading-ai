@@ -41,6 +41,46 @@ INSTRUMENT_CURRENCIES: dict[str, tuple[str, ...]] = {
 
 UNIVERSE: tuple[str, ...] = tuple(INSTRUMENT_CURRENCIES)
 
+# --- trending assets --------------------------------------------------------
+#
+# The hypothesis these exist to test: momentum works on assets that TREND and
+# fails on FX majors, which are relative prices between two similar economies
+# and therefore mean-revert. That single mechanism explains all 48 backtest
+# results at once (XAUUSD positive, 15 FX pairs negative) - and, crucially, it
+# predicts momentum should also work HERE, on data never examined. A hypothesis
+# that only explains the past is a story; one that predicts unseen data is
+# testable.
+#
+# Selected on two criteria, both decided before looking at any result:
+#   1. a structural reason to trend (persistent macro/supply flows, not a
+#      relative price between similar economies);
+#   2. cost <= ~0.04R, measured by scripts/list_symbols.py. Cost is what killed
+#      range_fade's real +264R gross signal, so anything expensive is answered
+#      before testing begins.
+#
+# DELIBERATELY EXCLUDED despite temptingly cheap costs (~0.005R): XAUEUR,
+# XAUGBP, XAUJPY, XAUCHF, XAUAUD, GCQ26 - every one of them IS gold, merely
+# quoted in another currency. Testing them would re-run the same coin flip and
+# call the echo a confirmation. SIU26_CFD is likewise silver's future.
+TRENDING_CURRENCIES: dict[str, tuple[str, ...]] = {
+    "XAGUSD": ("USD",),   # silver     - different metal, own supply/demand
+    "XPTUSD": ("USD",),   # platinum   - industrial, distinct cycle
+    "XPDUSD": ("USD",),   # palladium  - industrial, distinct cycle
+    "XNGUSD": ("USD",),   # natural gas - weather/storage driven
+    "BTCUSD": ("USD",),   # bitcoin    - wholly independent of the metals complex
+    "MidDE50": ("EUR",),  # German mid-cap index
+    "MidDE60": ("EUR",),  # German mid-cap index
+    "IT40": ("EUR",),     # Italian index
+}
+
+# Gold sits here because it genuinely belongs in a trending-asset strategy - but
+# it is the IN-SAMPLE origin of the hypothesis, so its result proves nothing.
+# Read the eight symbols above; gold is the control, not the evidence.
+TRENDING_UNIVERSE: tuple[str, ...] = tuple(TRENDING_CURRENCIES) + ("XAUUSD",)
+
+# One lookup for the blackout, so a symbol added to either universe is covered.
+ALL_CURRENCIES: dict[str, tuple[str, ...]] = {**INSTRUMENT_CURRENCIES, **TRENDING_CURRENCIES}
+
 NEWS_BLACKOUT_MINUTES = 30
 
 
@@ -49,7 +89,7 @@ def news_blackout(
 ) -> str | None:
     """Reason string if a high-impact event in one of this symbol's currencies
     falls within `minutes` either side of `as_of`; None if clear."""
-    relevant = INSTRUMENT_CURRENCIES.get(context.symbol, ())
+    relevant = ALL_CURRENCIES.get(context.symbol, ())
     for event in context.upcoming_news:
         if event.currency not in relevant or event.impact != "high":
             continue

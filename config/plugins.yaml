@@ -13,6 +13,10 @@ strategies:
   - london_breakout_v1    # scheduled volatility regime shift at the London open
   - range_fade_v1         # mean reversion - the complement of ema_trend_v1 (ADX < 20)
   - donchian_breakout_v1  # price-channel momentum (different trigger to ema_trend_v1)
+  # Identical logic to donchian_breakout_v1, aimed at trending assets (metals,
+  # gas, BTC, EU indices). An out-of-sample test of "momentum works on trending
+  # assets, not on mean-reverting FX", not a new idea - it has no knobs of its own.
+  - donchian_trending_v1
 risk_engine: default
 execution_engine: default
 news_provider: forexfactory  # free ForexFactory weekly economic calendar (no
