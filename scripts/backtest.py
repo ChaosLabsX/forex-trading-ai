@@ -56,9 +56,21 @@ from engine.plugins.market_data.mt5_market_data import MT5MarketDataProvider
 from engine.registry import PLUGIN_REGISTRY, load_plugin
 from engine.stats import bootstrap_expectancy_ci, longest_losing_streak, max_drawdown_r
 
-H1_WINDOW = 300  # matches engine/loop.py CANDLE_COUNT[H1]
-H4_WINDOW = 250  # matches engine/loop.py CANDLE_COUNT[H4]
-H1_HISTORY_BARS = 20_000  # ask for ~2.7 years of H1; broker caps what it returns
+# Windows must match engine/loop.py CANDLE_COUNT, or the backtest feeds a
+# strategy a different amount of history than production does and measures
+# something that will never actually trade.
+WINDOW = {Timeframe.H1: 300, Timeframe.H4: 250, Timeframe.D1: 90}
+# Hours per bar, used to request the same span of history across timeframes.
+TF_HOURS = {
+    Timeframe.M1: 1 / 60,
+    Timeframe.M5: 5 / 60,
+    Timeframe.M15: 0.25,
+    Timeframe.M30: 0.5,
+    Timeframe.H1: 1.0,
+    Timeframe.H4: 4.0,
+    Timeframe.D1: 24.0,
+}
+ENTRY_HISTORY_BARS = 20_000  # ask big; the broker returns what it has
 MAX_HOLD_BARS = 200  # give up on a trade that never resolves within ~8 trading days
 
 # IC Markets "Raw Spread" charges commission separately from the (near-zero)
@@ -195,9 +207,31 @@ def simulate_outcome(
 def run_backtest_for_symbol(
     strategy: StrategyPlugin, md: MT5MarketDataProvider, symbol: str
 ) -> list[TradeOutcome]:
-    h1_all = md.get_candles(symbol, Timeframe.H1, H1_HISTORY_BARS)[:-1]  # drop forming bar
-    h4_all = md.get_candles(symbol, Timeframe.H4, H1_HISTORY_BARS // 4 + H4_WINDOW)[:-1]
-    h4_times = [c.time for c in h4_all]
+    # Timeframes come from the STRATEGY, never hardcoded here. The previous
+    # version fetched H1+H4 regardless of what was asked for, so a strategy
+    # wanting D1 (range_fade_h4_v1) hit "insufficient history" on every bar and
+    # reported zero trades - which reads as "this idea never triggers" rather
+    # than "the tool cannot run this idea". A silently empty result is the worst
+    # kind of wrong.
+    entry_tf = strategy.required_timeframes[0]
+    context_tfs = tuple(strategy.required_timeframes[1:])
+    entry_window = WINDOW[entry_tf]
+
+    entry_all = md.get_candles(symbol, entry_tf, ENTRY_HISTORY_BARS)[:-1]  # drop forming bar
+    if len(entry_all) <= entry_window + 2:
+        return []
+
+    # Ask each context timeframe for the SAME span of history the entry bars
+    # cover, so a slower regime filter isn't starved on long runs.
+    span_hours = len(entry_all) * TF_HOURS[entry_tf]
+    context_bars: dict = {}
+    context_times: dict = {}
+    for tf in context_tfs:
+        needed = int(span_hours / TF_HOURS[tf]) + WINDOW[tf] + 2
+        bars = md.get_candles(symbol, tf, needed)[:-1]
+        context_bars[tf] = bars
+        context_times[tf] = [c.time for c in bars]
+
     costs = resolve_costs(symbol)
 
     outcomes: list[TradeOutcome] = []
@@ -206,18 +240,27 @@ def run_backtest_for_symbol(
     untradeable = 0
 
     # stop at len-2: a signal on bar i needs bar i+1 to exist to fill the entry
-    for i in range(H1_WINDOW, len(h1_all) - 2):
-        h1_window = h1_all[i - H1_WINDOW : i + 1]
-        as_of = h1_window[-1].time
+    for i in range(entry_window, len(entry_all) - 2):
+        window = entry_all[i - entry_window : i + 1]
+        as_of = window[-1].time
 
-        h4_end = bisect_right(h4_times, as_of)
-        h4_window = h4_all[max(0, h4_end - H4_WINDOW) : h4_end]
-        if len(h4_window) < H4_WINDOW:
+        candles: dict = {entry_tf: window}
+        starved = False
+        for tf in context_tfs:
+            # Only bars that had already CLOSED at as_of - taking any later bar
+            # would leak the future into the decision.
+            end = bisect_right(context_times[tf], as_of)
+            sliced = context_bars[tf][max(0, end - WINDOW[tf]) : end]
+            if len(sliced) < WINDOW[tf]:
+                starved = True
+                break
+            candles[tf] = sliced
+        if starved:
             continue
 
         context = StrategyContext(
             symbol=symbol,
-            candles_by_timeframe={Timeframe.H1: h1_window, Timeframe.H4: h4_window},
+            candles_by_timeframe=candles,
             account_state=PLACEHOLDER_ACCOUNT,
             open_positions=[],
             upcoming_news=(),
@@ -233,7 +276,7 @@ def run_backtest_for_symbol(
         # Realistic fill: enter at the NEXT bar's open, not the price that just
         # triggered the signal. Re-derive risk from the actual fill so R is
         # honest, keeping the strategy's own stop/target levels.
-        entry_fill = h1_all[i + 1].open
+        entry_fill = entry_all[i + 1].open
         risk_price = abs(entry_fill - signal.stop_loss)
         # A stop this tight could never have been placed (broker stops-level,
         # or narrower than the spread). Counting it would let 1/risk blow the
@@ -243,7 +286,7 @@ def run_backtest_for_symbol(
             continue
 
         result, gross_r = simulate_outcome(
-            signal.direction, entry_fill, signal.stop_loss, signal.take_profit, h1_all[i + 2 :]
+            signal.direction, entry_fill, signal.stop_loss, signal.take_profit, entry_all[i + 2 :]
         )
         cost_r = cost_in_r(costs, risk_price)
         outcomes.append(
@@ -371,7 +414,23 @@ def main() -> None:
             f"      is the question that matters: does it hold in BOTH halves?\n"
         )
 
-    print(f"Backtesting '{strategy.name}' over {len(symbols)} instrument(s)\n")
+    # Fail loudly on a timeframe we can't serve. The old version silently fed
+    # every strategy H1+H4, so range_fade_h4_v1 (which wants D1) starved on every
+    # bar and printed "no trades" - indistinguishable from an idea that simply
+    # never triggers. A tool that reports nothing when it is broken is worse than
+    # one that crashes.
+    unsupported = [tf for tf in strategy.required_timeframes if tf not in WINDOW or tf not in TF_HOURS]
+    if unsupported:
+        print(f"cannot backtest '{key}': no window/step configured for "
+              f"{', '.join(tf.value for tf in unsupported)}")
+        print(f"supported: {', '.join(tf.value for tf in WINDOW)}")
+        raise SystemExit(2)
+
+    tfs = "  ".join(
+        f"{tf.value}({WINDOW[tf]})" for tf in strategy.required_timeframes
+    )
+    print(f"Backtesting '{strategy.name}' over {len(symbols)} instrument(s)")
+    print(f"  entry {strategy.required_timeframes[0].value}  ·  timeframes {tfs}\n")
     all_outcomes: list[TradeOutcome] = []
     print("Per-instrument (net of costs):\n")
     for symbol in symbols:
