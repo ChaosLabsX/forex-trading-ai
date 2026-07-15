@@ -12,6 +12,10 @@ strategies:
   - ema_trend_v1          # MA-crossover trend-following (reference implementation)
   - london_breakout_v1    # scheduled volatility regime shift at the London open
   - range_fade_v1         # mean reversion - the complement of ema_trend_v1 (ADX < 20)
+  # Same fade one scale up. range_fade_v1 has a REAL gross edge (+0.044R/trade,
+  # CI above zero) that its 0.066R costs consume. Cost-in-R falls as the stop
+  # grows, so H4 halves the drag. A cost test with no knobs of its own.
+  - range_fade_h4_v1
   - donchian_breakout_v1  # price-channel momentum (different trigger to ema_trend_v1)
   # Identical logic to donchian_breakout_v1, aimed at trending assets (metals,
   # gas, BTC, EU indices). An out-of-sample test of "momentum works on trending

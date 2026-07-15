@@ -50,6 +50,13 @@ class RangeFadeStrategy(StrategyPlugin):
     """
 
     name = "range_fade_v1"
+    # Timeframes are CLASS attributes, not module constants, so the same
+    # evaluate() can run at another scale without being copied. That matters:
+    # cost-in-R is commission / (stop x value), so it shrinks as the stop grows -
+    # the identical signal on a bigger bar carries a smaller cost drag. A
+    # subclass changing only these is a scale test, not a new strategy.
+    entry_tf = ENTRY_TIMEFRAME
+    regime_tf = REGIME_TIMEFRAME
     required_timeframes = (ENTRY_TIMEFRAME, REGIME_TIMEFRAME)
     instruments = UNIVERSE
 
@@ -60,8 +67,8 @@ class RangeFadeStrategy(StrategyPlugin):
         if has_open_position(context):
             return StrategyEvaluation(None, "position already open for this symbol")
 
-        h1 = context.candles_by_timeframe.get(ENTRY_TIMEFRAME, [])
-        h4 = context.candles_by_timeframe.get(REGIME_TIMEFRAME, [])
+        h1 = context.candles_by_timeframe.get(self.entry_tf, [])
+        h4 = context.candles_by_timeframe.get(self.regime_tf, [])
         if len(h1) < MEAN_EMA + ATR_PERIOD + 2 or len(h4) < ADX_PERIOD * 3:
             return StrategyEvaluation(None, "insufficient candle history for indicators")
 
@@ -119,7 +126,7 @@ class RangeFadeStrategy(StrategyPlugin):
                 strategy_name=self.name,
                 symbol=context.symbol,
                 direction=direction,
-                timeframe=ENTRY_TIMEFRAME,
+                timeframe=self.entry_tf,
                 entry_price=entry,
                 stop_loss=entry - sign * STOP_ATR_MULTIPLE * atr_value,
                 take_profit=entry + sign * TARGET_ATR_MULTIPLE * atr_value,
