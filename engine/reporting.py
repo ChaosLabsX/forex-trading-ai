@@ -149,7 +149,10 @@ def format_readiness_change(strategy: dict, previous: str | None, evaluation: Ev
 
     lines = [
         f"{icon} {headline}  ·  {name}",
-        f"was {_LABEL.get(previous or NOT_READY, previous).lower()}",
+        # Not lowercased: READY is capitalised in _LABEL because it is the state
+        # that matters, and "was ready" whispers the very thing a demotion alert
+        # exists to shout.
+        f"was {_LABEL.get(previous or NOT_READY, previous)}",
         stats_line(evaluation.stats),
         evaluation.reason,
     ]
