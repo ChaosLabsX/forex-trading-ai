@@ -64,6 +64,7 @@ broker/strategy/provider without touching anything else.
 | [`docs/dashboard.md`](docs/dashboard.md) | the React dashboard in depth - structure, auth model, how to add a view |
 | [`docs/safety-rails.md`](docs/safety-rails.md) | `TEST_MODE`, circuit breakers, the RLS security model, known gaps |
 | [`docs/going-live.md`](docs/going-live.md) | **the real-money runbook** - the four guards, how sizing works, and the exact procedure. Read this before touching anything live; it assumes no prior context |
+| [`docs/research-log.md`](docs/research-log.md) | **what has been tested and what it returned.** Five strategies, ~31k trades, no demonstrated edge. Read before proposing a strategy - it records the dead ends, and the rule against generating variants until one passes |
 | [`infra/vps-setup.md`](infra/vps-setup.md) | VPS setup - Phase 6, VPS is provisioned, checklist in progress |
 
 ## Conventions specific to this repo
