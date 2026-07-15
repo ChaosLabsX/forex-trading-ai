@@ -703,7 +703,15 @@ class EngineLoop:
 
         open_tickets = {p.id for p in open_positions}
         try:
-            open_trade_rows = self._supabase.select("trades", {"status": "eq.OPEN"})
+            # MUST filter by account. Without it every engine reconciles every
+            # OTHER account's trades: it looks up a ticket that was never in its
+            # terminal, concludes the position closed, and writes CLOSED with a
+            # null P&L. Two engines then race to destroy each other's data - and
+            # since the evaluator skips trades with no P&L, the lab silently
+            # collects nothing at all while looking healthy.
+            open_trade_rows = self._supabase.select(
+                "trades", {"status": "eq.OPEN", "account_key": f"eq.{self._account_key}"}
+            )
         except Exception:
             logger.exception("failed to fetch open trades from Supabase for reconciliation")
             return

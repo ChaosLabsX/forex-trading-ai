@@ -138,6 +138,11 @@ class ReadinessEvaluator:
         r_values: list[float] = []
         net = 0.0
         for row in rows:
+            # Voided trades have an untrustworthy recorded outcome (see migration
+            # 0013). Excluding them is the point - counting them would poison the
+            # verdict with a number nobody believes.
+            if row.get("void_reason"):
+                continue
             pnl = row.get("realized_pnl")
             risk = row.get("risk_amount")
             if pnl is None:
