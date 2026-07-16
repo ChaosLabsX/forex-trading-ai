@@ -5,6 +5,7 @@ import { useDashboardData } from "../lib/useDashboardData";
 import { useStrategyLab } from "../lib/useStrategyLab";
 import { StatTiles } from "./StatTiles";
 import { PausedBanner } from "./PausedBanner";
+import { DataQuality } from "./DataQuality";
 import { AccountFilter } from "./AccountFilter";
 import { Engines } from "./Engines";
 import { StrategyLab } from "./StrategyLab";
@@ -85,6 +86,9 @@ export function Dashboard({ session }: { session: Session }) {
         <>
           {/* Pause is engine state, not account scope - never hide it behind a filter. */}
           <PausedBanner session={session} paused={health.filter((h) => h.paused)} />
+          {/* Same reasoning: whether the data below is trustworthy isn't a
+              per-account question the filter should be able to hide. */}
+          <DataQuality accounts={lab.accounts} />
           <AccountFilter accounts={accounts} selected={activeKey} onSelect={setSelected} />
           <StatTiles
             health={scoped.health}

@@ -342,6 +342,58 @@ body {
   border: 1px solid var(--accent);
 }
 
+.banner-crit {
+  background: var(--crit-tint);
+  border: 1px solid var(--crit);
+  align-items: flex-start;
+}
+
+/* ---------- Data quality ---------- */
+
+/* Deliberately a single quiet line, not a card - a health check that shouts
+   even when everything is fine trains you to stop reading it. */
+.dq-clean {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--ink-muted);
+  margin: 0 0 16px;
+}
+
+.dq-rows {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dq-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.dq-row-account {
+  font-weight: 600;
+  color: var(--ink);
+  min-width: 140px;
+}
+
+.dq-row-detail {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.dq-row-context {
+  font-size: 12px;
+  color: var(--ink-muted);
+}
+
 /* ---------- Strategy laboratory ---------- */
 
 .lab-summary {

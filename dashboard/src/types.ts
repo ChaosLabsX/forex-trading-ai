@@ -41,6 +41,9 @@ export type Trade = {
   initial_stop_loss: number | null;
   /** Account currency at risk if the initial stop had been hit. */
   risk_amount: number | null;
+  /** Non-null means excluded from every statistic - set only by a manual
+   * repair (e.g. migration 0013), never by the engine. */
+  void_reason: string | null;
 };
 
 export type Heartbeat = {
