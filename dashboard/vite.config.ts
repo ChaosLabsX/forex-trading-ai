@@ -9,16 +9,15 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'favicon-96x96.png', 'apple-touch-icon.png'],
-      // Naming here is a SAFETY surface, not branding. Google Safe Browsing
-      // flagged chaoslabsx.github.io as social engineering, and its definition
-      // of phishing is impersonation ("sites that pretend to be other sites").
-      // A credential form captioned with a broker's name on free shared hosting
-      // is that pattern exactly, so no broker or platform name appears on any
-      // public-facing string. "Strategy Lab" is also just the honest
-      // description - see docs/strategy-lab.md.
+      // The install name is the app's own identity ("Forex AI"). The DESCRIPTION
+      // deliberately names no broker or platform: Safe Browsing reads phishing
+      // as impersonation, and the flagged pattern was a specific broker's name
+      // ("MT5 + IC Markets") beside a credential form. The manifest is fetchable
+      // from the public login gate, so it stays broker-free even though the
+      // signed-in app is branded. See docs/dashboard.md.
       manifest: {
-        name: 'Strategy Lab',
-        short_name: 'Strategy Lab',
+        name: 'Forex AI',
+        short_name: 'Forex AI',
         description: 'Private dashboard for one person\'s quantitative research project.',
         theme_color: '#0d0d0d',
         background_color: '#0d0d0d',
@@ -40,7 +39,7 @@ export default defineConfig({
       },
     }),
   ],
-  // Served from a GitHub Pages CUSTOM DOMAIN (second-automation.chaoslabsx.com,
+  // Served from a GitHub Pages CUSTOM DOMAIN (forex-automation.chaoslabsx.com,
   // set by public/CNAME), which serves at the domain ROOT - so base is "/", not
   // a "/<repo>/" project-page prefix. If this ever reverts to the bare
   // chaoslabsx.github.io/<repo>/ URL, base must become "/<repo>/" again or every

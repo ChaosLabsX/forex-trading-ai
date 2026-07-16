@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { useAuth } from "../lib/useAuth";
 import { useDashboardData } from "../lib/useDashboardData";
@@ -22,6 +22,18 @@ export function Dashboard({ session }: { session: Session }) {
   // about which strategy is leading or why it isn't Ready.
   const lab = useStrategyLab();
   const [selected, setSelected] = useState<string | null>(null);
+
+  // The app's identity is "Forex AI", but the static HTML <title> stays the
+  // neutral "Strategy Lab" so an unauthenticated crawler (which can't get past
+  // the login gate) never sees a broker-adjacent name next to a credential
+  // form - that pairing is what Safe Browsing reads as phishing. This effect
+  // runs only inside the signed-in app, so only a real user ever sees it.
+  useEffect(() => {
+    document.title = "Forex AI";
+    return () => {
+      document.title = "Strategy Lab";
+    };
+  }, []);
 
   // Verdicts derive from the demo lab by definition, so the readiness tiles are
   // pinned to it and do not follow the account filter.
@@ -54,7 +66,7 @@ export function Dashboard({ session }: { session: Session }) {
     <div className="shell">
       <header className="topbar">
         <img src={logoUrl} className="topbar-logo" alt="" />
-        <h1 className="topbar-title">Strategy Lab</h1>
+        <h1 className="topbar-title">Forex AI</h1>
         <span className="topbar-spacer" />
         <button
           className="btn btn-ghost"

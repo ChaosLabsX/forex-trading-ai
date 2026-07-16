@@ -79,7 +79,7 @@ needs its own grants/RLS policies on every table the dashboard reads, even the
 ## Deployment
 
 - `vite.config.ts`: `base` is `/` because the dashboard is served from a GitHub
-  Pages **custom domain** (`second-automation.chaoslabsx.com`), which serves at
+  Pages **custom domain** (`forex-automation.chaoslabsx.com`), which serves at
   the domain root. If it ever reverts to the bare `chaoslabsx.github.io/<repo>/`
   project-page URL, `base` must become `/<repo>/` or every asset 404s and the
   page renders blank.
