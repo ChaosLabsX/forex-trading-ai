@@ -6,6 +6,49 @@ const POLL_MS = 30_000;
 
 const RANK: Record<Readiness, number> = { ready: 2, almost_ready: 1, not_ready: 0 };
 
+/** The READY bar, mirrored from engine/config.py Settings.readiness_*. These are
+ * duplicated here ONLY to render progress visuals; the evaluator remains the
+ * sole authority that grants readiness, and its verdict_reason stays the
+ * authoritative text. Keep in sync with the engine - but note the bar changes
+ * rarely and on purpose ("the bar is the product", docs/strategy-lab.md), so
+ * drift is unlikely. If they ever diverge, the engine wins. */
+export const READINESS = {
+  minTradesReady: 100, // readiness_min_trades_ready
+  minTradesAlmost: 30, // readiness_min_trades_almost - first point a verdict appears
+  minProfitFactor: 1.2, // readiness_min_profit_factor
+  maxDrawdownR: 15, // readiness_max_drawdown_r
+} as const;
+
+export type Gate = { key: string; label: string; met: boolean };
+
+/** The four quality gates a strategy must clear to be READY, in the same order
+ * engine/evaluator.py classify() applies them. The trade-count minimum is shown
+ * separately (as a progress bar) because it is the one that actually moves;
+ * these are the pass/fail checks. A null field reads as "not met yet" rather
+ * than a false pass - an unproven strategy must never look proven. */
+export function readinessGates(e: StrategyEvaluation | null): Gate[] {
+  const n = e?.trades_count ?? 0;
+  const exp = e?.expectancy_r ?? null;
+  const ciLow = e?.ci_low ?? null;
+  const pf = e?.profit_factor ?? null;
+  const dd = e?.max_drawdown_r ?? null;
+  return [
+    { key: "sample", label: `${READINESS.minTradesReady}+ trades`, met: n >= READINESS.minTradesReady },
+    { key: "expectancy", label: "Expectancy > 0", met: exp !== null && exp > 0 },
+    { key: "ci", label: "95% CI clears zero", met: ciLow !== null && ciLow > 0 },
+    {
+      key: "pf",
+      label: `Profit factor ≥ ${READINESS.minProfitFactor}`,
+      met: pf !== null && pf >= READINESS.minProfitFactor,
+    },
+    {
+      key: "drawdown",
+      label: `Drawdown ≤ ${READINESS.maxDrawdownR}R`,
+      met: dd !== null && dd <= READINESS.maxDrawdownR,
+    },
+  ];
+}
+
 /** Strategy-lab data: registries + the latest evaluation snapshot per
  * (strategy, account). Kept separate from useDashboardData so the lab can poll
  * on its own, slower cadence - evaluations only change every 30 min. */
@@ -28,11 +71,20 @@ export function useStrategyLab() {
         .select("*")
         .order("computed_at", { ascending: false })
         .limit(500),
+      // Newest-first, NOT oldest-first. The cap is global across all strategies
+      // and both accounts, so `ascending: true` froze every equity curve on
+      // ancient history the moment the lab passed `limit` total closed trades -
+      // recent trades simply never made it into the fetched window. Descending
+      // keeps the window on the most recent trades; rSeries flips each strategy's
+      // slice back to chronological order for the curve. Trade-off: the curve is
+      // the most recent <=limit trades per strategy, not all-time - fine for a
+      // sparkline, and the evaluator still computes the authoritative stats from
+      // the full history server-side.
       supabase
         .from("trades")
         .select("*")
         .eq("status", "CLOSED")
-        .order("closed_at", { ascending: true })
+        .order("closed_at", { ascending: false })
         .limit(1000),
     ]);
     setAccounts(acc.data ?? []);
@@ -112,6 +164,10 @@ export function rSeries(trades: Trade[], strategyName: string, accountKey: strin
         t.risk_amount !== null &&
         t.risk_amount !== 0
     )
+    // The fetch is newest-first (global cap - see useStrategyLab), but a
+    // cumulative equity curve must run oldest -> newest. filter() returns a
+    // fresh array, so reversing it here is safe and doesn't touch the caller's.
+    .reverse()
     .map((t) => (t.realized_pnl as number) / (t.risk_amount as number));
 }
 

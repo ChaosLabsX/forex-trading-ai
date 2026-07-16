@@ -7,6 +7,7 @@ import {
   setStrategyEnabled,
 } from "../lib/useStrategyLab";
 import { StrategyReport } from "./StrategyReport";
+import { GateList, TradeProgress } from "./Readiness";
 
 const VERDICT_LABEL: Record<Readiness, string> = {
   ready: "READY",
@@ -100,7 +101,7 @@ export function StrategyLab({ accounts, strategies, links, evaluations, closedTr
               <th>95% CI</th>
               <th>PF</th>
               <th>Max DD</th>
-              <th>What it still needs</th>
+              <th>Progress to READY</th>
               <th>Demo</th>
               <th>Live</th>
             </tr>
@@ -127,7 +128,9 @@ export function StrategyLab({ accounts, strategies, links, evaluations, closedTr
                         {VERDICT_LABEL[strategy.readiness]}
                       </span>
                     </td>
-                    <td className="cell-num" data-label="Trades">{evaluation?.trades_count ?? 0}</td>
+                    <td className="cell-num" data-label="Trades">
+                      <TradeProgress trades={evaluation?.trades_count ?? 0} />
+                    </td>
                     <td className="cell-num" data-label="Win">{fmt(evaluation?.win_rate, 0, "%")}</td>
                     <td className="cell-num" data-label="Expectancy">
                       {fmt(evaluation?.expectancy_r, 3, "R")}
@@ -141,12 +144,22 @@ export function StrategyLab({ accounts, strategies, links, evaluations, closedTr
                     <td className="cell-num" data-label="Max DD">
                       {fmt(evaluation?.max_drawdown_r, 1, "R")}
                     </td>
-                    {/* The evaluator's own words. verdict_reason is rewritten every
-                        snapshot, unlike strategies.readiness_reason which is only
-                        rewritten when the verdict CHANGES - so this is the only
-                        field that answers "what is blocking it right now". */}
-                    <td className="cell-reason cell-wide" data-label="What it still needs">
-                      {evaluation?.verdict_reason ?? "Not evaluated yet"}
+                    {/* The gate ladder makes the shape scannable; the evaluator's
+                        verdict_reason underneath is the precise binding constraint.
+                        verdict_reason is rewritten every snapshot (unlike
+                        strategies.readiness_reason, which only changes when the
+                        verdict does), so it always answers "what blocks it now". */}
+                    <td className="cell-reason cell-wide" data-label="Progress to READY">
+                      {evaluation ? (
+                        <>
+                          <GateList evaluation={evaluation} />
+                          {evaluation.verdict_reason && (
+                            <div className="gate-reason">{evaluation.verdict_reason}</div>
+                          )}
+                        </>
+                      ) : (
+                        "Not evaluated yet"
+                      )}
                     </td>
                     <td data-label="Demo" onClick={(e) => e.stopPropagation()}>
                       {demoLink ? (

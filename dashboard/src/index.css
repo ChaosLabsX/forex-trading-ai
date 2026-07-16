@@ -679,6 +679,95 @@ input:focus {
   white-space: nowrap;
 }
 
+/* ---------- Readiness: trades progress + gate ladder ---------- */
+
+.tprog {
+  min-width: 88px;
+}
+
+.tprog-label {
+  font-size: 13.5px;
+  line-height: 1.2;
+  margin-bottom: 5px;
+}
+
+.tprog-label strong {
+  font-weight: 700;
+}
+
+.tprog-label span {
+  color: var(--ink-muted);
+}
+
+.tprog-track {
+  position: relative;
+  height: 5px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+}
+
+.tprog-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  /* Neutral accent, never green - accumulating trades is not evidence of edge. */
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+/* The 30-trade mark: where the evaluator first renders a verdict. */
+.tprog-tick {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  background: var(--ink-muted);
+  transform: translateX(-1px);
+}
+
+.gates {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+
+.gate {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.gate-mark {
+  font-weight: 700;
+}
+
+/* Symbol + colour together, never colour alone (dark-palette rule). A met gate
+   is legible ink with a green check; an unmet one is muted with a hollow ring. */
+.gate.is-met {
+  color: var(--ink-2);
+}
+
+.gate.is-met .gate-mark {
+  color: var(--good);
+}
+
+.gate.is-unmet {
+  color: var(--ink-muted);
+}
+
+.gate-reason {
+  font-size: 12px;
+  color: var(--ink-muted);
+  margin-top: 6px;
+  line-height: 1.5;
+}
+
 /* AI reasoning disclosure inside a cell */
 .ai-details summary {
   cursor: pointer;

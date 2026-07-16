@@ -1,6 +1,6 @@
 import type { Trade, Strategy, StrategyEvaluation } from "../types";
 import type { AccountHealth } from "../lib/useDashboardData";
-import { latestEvaluation, rankStrategies } from "../lib/useStrategyLab";
+import { latestEvaluation, rankStrategies, readinessGates, READINESS } from "../lib/useStrategyLab";
 
 type Props = {
   health: AccountHealth[];
@@ -64,10 +64,13 @@ export function StatTiles({ health, openTrades, strategies, evaluations, labAcco
         ? "CI unavailable - too few trades"
         : "No evaluation yet";
 
-  // The evaluator rewrites verdict_reason on EVERY snapshot; strategies.readiness_reason
-  // is only rewritten when the verdict actually changes, so it goes stale between
-  // changes. For "what is blocking this right now", the snapshot is the honest source.
-  const blocker = leaderEval?.verdict_reason ?? "The lab has not evaluated this strategy yet";
+  // How far the leader is along the READY ladder: trades toward the 100 minimum,
+  // and how many of the quality gates are met. This is the honest "process"
+  // headline - the precise binding reason (verdict_reason) lives one glance down
+  // in the lab table's Progress column.
+  const leaderGates = readinessGates(leaderEval);
+  const leaderGatesMet = leaderGates.filter((g) => g.met).length;
+  const leaderTrades = leaderEval?.trades_count ?? 0;
 
   return (
     <div className="tiles">
@@ -111,7 +114,11 @@ export function StatTiles({ health, openTrades, strategies, evaluations, labAcco
               ? leader.display_name || leader.name
               : "—"}
         </div>
-        <div className="tile-sub">{leader ? blocker : "No strategies registered"}</div>
+        <div className="tile-sub">
+          {leader
+            ? `${leaderTrades} / ${READINESS.minTradesReady} trades · ${leaderGatesMet}/${leaderGates.length} checks passed`
+            : "No strategies registered"}
+        </div>
       </div>
     </div>
   );
