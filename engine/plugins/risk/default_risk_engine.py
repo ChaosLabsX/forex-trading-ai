@@ -18,9 +18,12 @@ TEST_MODE_LOT_SIZE = 0.01
 class DefaultRiskEngine(RiskEngine):
     """Safety rails plus sizing.
 
-    Rails first, always: max concurrent trades, a consecutive-losing-trades
-    circuit breaker, and an independent max-daily-loss % breaker - all computed
-    from real MT5 deal history, not estimates.
+    Rails first: the per-strategy max-concurrent-trades cap always applies, but
+    the two LOSS circuit breakers - consecutive losing trades, and max-daily-loss
+    % - run only when live trading is enabled. They exist to protect real
+    capital; on the demo lab they would corrupt the very data the lab collects
+    (see validate_signal). Both are computed from real MT5 deal history, not
+    estimates.
 
     Then sizing, which depends on TEST_MODE:
       * TEST_MODE=true  -> fixed micro lot, for the demo lab. Deliberately
@@ -50,22 +53,36 @@ class DefaultRiskEngine(RiskEngine):
         if open_count >= cap:
             return RiskDecision(approved=False, reason=f"max concurrent trades reached ({cap})")
 
-        if account_state.consecutive_stop_losses_today >= MAX_CONSECUTIVE_STOP_LOSSES:
-            return RiskDecision(
-                approved=False,
-                reason=(
-                    f"circuit breaker: {account_state.consecutive_stop_losses_today} consecutive "
-                    f"losing trades today (limit {MAX_CONSECUTIVE_STOP_LOSSES})"
-                ),
-            )
-
-        if account_state.balance > 0:
-            daily_loss_pct = -account_state.daily_pnl / account_state.balance * 100
-            if daily_loss_pct >= MAX_DAILY_LOSS_PCT:
+        # LOSS circuit breakers - live only. They protect real capital, so they
+        # run only when live trading is actually enabled. On the demo lab they
+        # would corrupt the data the lab exists to produce: a blocked signal is
+        # never recorded as a trade, and these breakers block precisely during
+        # losing streaks - censoring losers (biasing measured expectancy UP) and
+        # freezing account-wide accumulation toward the 100-trade readiness bar.
+        # The lab must see an unbiased, unthrottled sample of every signal.
+        #
+        # Gated on live_trading_enabled - the explicit real-money switch, which
+        # is only ever true on a live engine cleared to trade (engine/gating.py).
+        # NOT gated on test_mode: test_mode selects sizing style and is expressly
+        # not a safety signal (docs/going-live.md). A live account left on
+        # test_mode is the *dangerous* config, and it must keep its breakers.
+        if self._settings.live_trading_enabled:
+            if account_state.consecutive_stop_losses_today >= MAX_CONSECUTIVE_STOP_LOSSES:
                 return RiskDecision(
                     approved=False,
-                    reason=f"circuit breaker: daily loss {daily_loss_pct:.2f}% >= cap {MAX_DAILY_LOSS_PCT}%",
+                    reason=(
+                        f"circuit breaker: {account_state.consecutive_stop_losses_today} consecutive "
+                        f"losing trades today (limit {MAX_CONSECUTIVE_STOP_LOSSES})"
+                    ),
                 )
+
+            if account_state.balance > 0:
+                daily_loss_pct = -account_state.daily_pnl / account_state.balance * 100
+                if daily_loss_pct >= MAX_DAILY_LOSS_PCT:
+                    return RiskDecision(
+                        approved=False,
+                        reason=f"circuit breaker: daily loss {daily_loss_pct:.2f}% >= cap {MAX_DAILY_LOSS_PCT}%",
+                    )
 
         if self._settings.test_mode:
             order = ApprovedOrder(signal=signal, lot_size=TEST_MODE_LOT_SIZE, approved_by="default_risk_engine")
