@@ -95,16 +95,6 @@ body {
   text-align: left;
 }
 
-/* Deliberately legible, not hidden fine print: it exists to tell a human (and
-   Safe Browsing's crawler) that this is not a broker login. Hiding it would
-   defeat the entire purpose. */
-.gate-note {
-  margin: 24px 0 0;
-  color: var(--ink-muted);
-  font-size: 11px;
-  line-height: 1.6;
-  text-align: left;
-}
 
 /* ---------- App shell ---------- */
 
