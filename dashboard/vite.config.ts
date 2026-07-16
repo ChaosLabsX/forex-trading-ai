@@ -3,16 +3,23 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
-export default defineConfig(({ command }) => ({
+export default defineConfig({
   plugins: [
     react(),
     VitePWA({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'favicon-96x96.png', 'apple-touch-icon.png'],
+      // Naming here is a SAFETY surface, not branding. Google Safe Browsing
+      // flagged chaoslabsx.github.io as social engineering, and its definition
+      // of phishing is impersonation ("sites that pretend to be other sites").
+      // A credential form captioned with a broker's name on free shared hosting
+      // is that pattern exactly, so no broker or platform name appears on any
+      // public-facing string. "Strategy Lab" is also just the honest
+      // description - see docs/strategy-lab.md.
       manifest: {
-        name: 'Forex AI',
-        short_name: 'Forex AI',
-        description: 'MT5 + IC Markets automated trading - monitoring and control',
+        name: 'Strategy Lab',
+        short_name: 'Strategy Lab',
+        description: 'Private dashboard for one person\'s quantitative research project.',
         theme_color: '#0d0d0d',
         background_color: '#0d0d0d',
         display: 'standalone',
@@ -33,10 +40,10 @@ export default defineConfig(({ command }) => ({
       },
     }),
   ],
-  // GitHub Pages serves the production build as a project page at
-  // /forex-trading-ai/, not from the domain root - asset URLs need this
-  // prefix there. Dev server stays at the plain root; Vite applies `base`
-  // to both by default, which is what put /forex-trading-ai/ in the local
-  // dev URL.
-  base: command === "build" ? "/forex-trading-ai/" : "/",
-}))
+  // Served from a GitHub Pages CUSTOM DOMAIN (second-automation.chaoslabsx.com,
+  // set by public/CNAME), which serves at the domain ROOT - so base is "/", not
+  // a "/<repo>/" project-page prefix. If this ever reverts to the bare
+  // chaoslabsx.github.io/<repo>/ URL, base must become "/<repo>/" again or every
+  // asset 404s and the page renders blank.
+  base: "/",
+})

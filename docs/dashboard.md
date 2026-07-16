@@ -78,11 +78,15 @@ needs its own grants/RLS policies on every table the dashboard reads, even the
 
 ## Deployment
 
-- `vite.config.ts`: `base` is `/forex-trading-ai/` for the production build
-  (GitHub Pages serves this repo as a project page at that path) and `/` for
-  local dev (`command === "build"` check) - Vite applies `base` to both by
-  default, which is what put the prefix in local dev URLs before this was
-  fixed.
+- `vite.config.ts`: `base` is `/` because the dashboard is served from a GitHub
+  Pages **custom domain** (`second-automation.chaoslabsx.com`), which serves at
+  the domain root. If it ever reverts to the bare `chaoslabsx.github.io/<repo>/`
+  project-page URL, `base` must become `/<repo>/` or every asset 404s and the
+  page renders blank.
+- `dashboard/public/CNAME` - one line naming the custom domain. Vite copies it
+  verbatim into the build output, which is how GitHub Pages learns the domain on
+  each deploy. A custom domain is globally unique to one repo across GitHub, so
+  it can't be shared with another project.
 - `dashboard/public/.nojekyll` - an empty marker file GitHub Pages looks for to
   confirm it shouldn't run Jekyll processing on the deployed artifact.
 - The Supabase URL/anon key are baked in at build time as plain (non-secret)

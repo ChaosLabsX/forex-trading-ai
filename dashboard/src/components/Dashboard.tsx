@@ -54,7 +54,7 @@ export function Dashboard({ session }: { session: Session }) {
     <div className="shell">
       <header className="topbar">
         <img src={logoUrl} className="topbar-logo" alt="" />
-        <h1 className="topbar-title">Forex AI</h1>
+        <h1 className="topbar-title">Strategy Lab</h1>
         <span className="topbar-spacer" />
         <button
           className="btn btn-ghost"
