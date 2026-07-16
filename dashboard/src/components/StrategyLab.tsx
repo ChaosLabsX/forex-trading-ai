@@ -90,6 +90,7 @@ export function StrategyLab({ accounts, strategies, links, evaluations, closedTr
       )}
 
       <div className="card">
+        <div className="table-scroll">
         <table className="rtable lab-table">
           <thead>
             <tr>
@@ -215,6 +216,7 @@ export function StrategyLab({ accounts, strategies, links, evaluations, closedTr
             })}
           </tbody>
         </table>
+        </div>
       </div>
     </section>
   );

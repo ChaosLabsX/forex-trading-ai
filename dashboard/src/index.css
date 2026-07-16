@@ -253,7 +253,11 @@ body {
 
 .engine-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  /* min(300px, 100%), not a bare 300px floor: a plain minmax(300px, 1fr) track
+     cannot shrink below 300px even when the viewport itself is narrower,
+     forcing the whole page to scroll horizontally on very narrow phones. Same
+     safe pattern as .report-grid below. */
+  grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
   gap: 12px;
 }
 
@@ -528,6 +532,14 @@ body {
   color: var(--ink-muted);
 }
 
+.btn-showmore {
+  width: 100%;
+  margin-top: 10px;
+  font-size: 13px;
+  padding: 8px;
+  border-color: var(--hairline);
+}
+
 input {
   font: inherit;
   font-size: 14px;
@@ -619,6 +631,16 @@ input:focus {
 }
 
 /* ---------- Tables (responsive) ---------- */
+
+/* Lets a table wider than its card scroll WITHIN the card instead of pushing
+   the whole page sideways. Below the 700px breakpoint the table collapses to
+   stacked cards and never needs this; above it (the lab table has 11 columns
+   and won't fit until well past tablet width), this is what keeps the page
+   itself from ever scrolling horizontally. */
+.table-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
 
 .rtable {
   width: 100%;
@@ -725,7 +747,12 @@ input:focus {
   gap: 4px 12px;
 }
 
-.gate {
+/* NOTE: named .gate-item, NOT .gate - the login page's full-screen wrapper
+   (Login.tsx, App.tsx) already owns the bare .gate class. That collision
+   happened once already (both declarations set `display`, later-in-file
+   .gate won on specificity ties and silently broke the login page's
+   flex-centering) - keep this name distinct so it can't happen again. */
+.gate-item {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -739,15 +766,15 @@ input:focus {
 
 /* Symbol + colour together, never colour alone (dark-palette rule). A met gate
    is legible ink with a green check; an unmet one is muted with a hollow ring. */
-.gate.is-met {
+.gate-item.is-met {
   color: var(--ink-2);
 }
 
-.gate.is-met .gate-mark {
+.gate-item.is-met .gate-mark {
   color: var(--good);
 }
 
-.gate.is-unmet {
+.gate-item.is-unmet {
   color: var(--ink-muted);
 }
 

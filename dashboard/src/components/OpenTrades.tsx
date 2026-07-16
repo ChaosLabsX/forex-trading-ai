@@ -15,6 +15,7 @@ export function OpenTrades({ trades }: { trades: Trade[] }) {
             checks.
           </p>
         ) : (
+          <div className="table-scroll">
           <table className="rtable">
             <thead>
               <tr>
@@ -45,6 +46,7 @@ export function OpenTrades({ trades }: { trades: Trade[] }) {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </section>

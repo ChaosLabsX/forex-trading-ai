@@ -1,5 +1,9 @@
 import type { Signal } from "../types";
 import { fmtDateTime } from "../lib/format";
+import { useShowMore } from "../lib/useShowMore";
+
+const INITIAL_ROWS = 5;
+const STEP_ROWS = 10;
 
 function SignalBadge({ signal }: { signal: Signal }) {
   if (!signal.fired) {
@@ -40,16 +44,19 @@ function AIBadge({ signal }: { signal: Signal }) {
 }
 
 export function SignalsFeed({ signals }: { signals: Signal[] }) {
+  const { visible, shown, total, hasMore, showMore } = useShowMore(signals, INITIAL_ROWS, STEP_ROWS);
   return (
     <section className="section">
       <div className="section-head">
         <h2 className="section-title">Recent signals</h2>
-        <span className="section-meta">every evaluation, fired or filtered</span>
+        <span className="section-meta">{shown} of {total} · every evaluation, fired or filtered</span>
       </div>
       <div className="card">
         {signals.length === 0 ? (
           <p className="empty">No signals logged yet.</p>
         ) : (
+          <>
+          <div className="table-scroll">
           <table className="rtable">
             <thead>
               <tr>
@@ -61,7 +68,7 @@ export function SignalsFeed({ signals }: { signals: Signal[] }) {
               </tr>
             </thead>
             <tbody>
-              {signals.map((s) => (
+              {visible.map((s) => (
                 <tr key={s.id}>
                   <td className="cell-time" data-label="Time">{fmtDateTime(s.created_at)}</td>
                   <td className="cell-sym" data-label="Symbol">{s.symbol}</td>
@@ -78,6 +85,13 @@ export function SignalsFeed({ signals }: { signals: Signal[] }) {
               ))}
             </tbody>
           </table>
+          </div>
+          {hasMore && (
+            <button className="btn btn-ghost btn-showmore" onClick={showMore}>
+              Show more ({total - shown} more)
+            </button>
+          )}
+          </>
         )}
       </div>
     </section>

@@ -41,7 +41,7 @@ export function GateList({ evaluation }: { evaluation: StrategyEvaluation | null
   return (
     <ul className="gates">
       {gates.map((g) => (
-        <li key={g.key} className={g.met ? "gate is-met" : "gate is-unmet"}>
+        <li key={g.key} className={g.met ? "gate-item is-met" : "gate-item is-unmet"}>
           <span className="gate-mark" aria-hidden="true">
             {g.met ? "✓" : "○"}
           </span>
