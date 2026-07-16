@@ -8,6 +8,7 @@ import {
 } from "../lib/useStrategyLab";
 import { StrategyReport } from "./StrategyReport";
 import { GateList, TradeProgress } from "./Readiness";
+import { fmtStrategyName } from "../lib/format";
 
 const VERDICT_LABEL: Record<Readiness, string> = {
   ready: "READY",
@@ -122,7 +123,7 @@ export function StrategyLab({ accounts, strategies, links, evaluations, closedTr
                     onClick={() => setSelected(open ? null : strategy.name)}
                   >
                     <td className="cell-sym" data-label="Strategy">
-                      {strategy.display_name || strategy.name}
+                      {fmtStrategyName(strategy.display_name || strategy.name)}
                     </td>
                     <td data-label="Verdict">
                       <span className={`badge ${VERDICT_CLASS[strategy.readiness]}`}>

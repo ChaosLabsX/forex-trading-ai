@@ -180,6 +180,20 @@ body {
   white-space: nowrap;
 }
 
+/* A strategy name in the "Closest to READY" tile. The parent .tile-value forces
+   white-space: nowrap (right for the short numeric tiles), so a long name like
+   "donchian breakout v1" would overflow and push the whole page sideways -
+   override it here to wrap. min-width: 0 lets this flex child shrink;
+   overflow-wrap: anywhere is the safety net if a single word is still too wide.
+   Smaller than the numeric tiles because a name isn't a KPI figure. */
+.tile-strategy {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 18px;
+  line-height: 1.2;
+}
+
 .dot {
   width: 9px;
   height: 9px;

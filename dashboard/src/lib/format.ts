@@ -21,6 +21,16 @@ export function fmtPrice(value: number): string {
   return String(value);
 }
 
+/** Strategy names are underscore identifiers ("donchian_breakout_v1") - one
+ * long unbreakable token that forces horizontal scroll in a narrow container.
+ * Turning underscores into spaces lets it wrap at word boundaries. Display-only:
+ * the real name (plugin key, DB key, ticket-ownership map) is never touched, so
+ * a nicer display_name set later still wins (it simply has no underscores to
+ * replace). */
+export function fmtStrategyName(nameOrDisplay: string): string {
+  return nameOrDisplay.replace(/_/g, " ");
+}
+
 export function fmtAgo(iso: string): string {
   const seconds = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
   if (seconds < 60) return `${Math.round(seconds)}s ago`;

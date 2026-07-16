@@ -1,6 +1,7 @@
 import type { Trade, Strategy, StrategyEvaluation } from "../types";
 import type { AccountHealth } from "../lib/useDashboardData";
 import { latestEvaluation, rankStrategies, readinessGates, READINESS } from "../lib/useStrategyLab";
+import { fmtStrategyName } from "../lib/format";
 
 type Props = {
   health: AccountHealth[];
@@ -111,7 +112,7 @@ export function StatTiles({ health, openTrades, strategies, evaluations, labAcco
           {readyCount > 0
             ? `${readyCount} READY`
             : leader
-              ? leader.display_name || leader.name
+              ? <span className="tile-strategy">{fmtStrategyName(leader.display_name || leader.name)}</span>
               : "—"}
         </div>
         <div className="tile-sub">
