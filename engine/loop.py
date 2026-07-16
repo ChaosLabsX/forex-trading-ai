@@ -568,6 +568,17 @@ class EngineLoop:
         ai_provider = self._engine.ai_provider
         if ai_provider is None:
             return
+        # Live only. The shadow review costs an Opus API call per fired signal;
+        # it only earns that on a live account, where a track record of its
+        # opinions against real-money outcomes could one day justify letting it
+        # gate trades. On the demo lab it would bill continuously for opinions
+        # nothing consumes. Gated on the live master switch - the same one the
+        # loss circuit breakers use - so it resumes by itself the moment live
+        # trading is enabled, with no config to remember. Nothing reads
+        # ai_reviews except the dashboard's display, so skipping it changes no
+        # trade and no readiness verdict.
+        if not self._settings.live_trading_enabled:
+            return
 
         try:
             verdict = ai_provider.review_signal(signal, context)
