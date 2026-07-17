@@ -156,9 +156,26 @@ was ever claimed.
 
 ## Incidental findings worth not rediscovering
 
-- **Platinum/palladium are structurally untradeable with ATR stops.** Their
-  broker minimum stop distance (XPTUSD: 14.92) *exceeds* typical ATR - 816
-  XPTUSD signals were unplaceable. Volatility-scaled stops cannot work there.
+- **Some instruments are structurally untradeable, and only the broker says so.**
+  Platinum/palladium: the broker minimum stop distance (XPTUSD: 14.92) *exceeds*
+  typical ATR - 816 signals were unplaceable, so volatility-scaled stops cannot
+  work there. MidDE50 (2026-07-17) hit the same wall twice: it first rejected the
+  lab's hardcoded 0.01 lot (retcode 10014 - index CFDs carry a larger
+  `volume_min`; fixed by sizing to the broker's minimum), and behind that
+  rejected the ATR stop as too tight (retcode 10016) - the XPTUSD trap again. So
+  `donchian_trending_v1` has never recorded a trade on any of its three index
+  CFDs. That changes nothing about its verdict (already falsified, 0-for-8), but
+  the **shape** matters: *a signal fires, the order silently cannot be placed,
+  and no trade is ever recorded* - a strategy's real universe can be quietly
+  smaller than its declared one. Note the asymmetry that hides it: the backtest
+  floors out stops that could never have been placed, while the live engine
+  attempts them, so this only ever surfaces as a failed order.
+  **The subtle risk, for any future strategy:** an ATR stop falls below the
+  broker minimum precisely when volatility is *low*. If an instrument's minimum
+  always exceeds its ATR the instrument is simply absent (harmless). If it is
+  *marginal*, only the high-volatility trades survive to be recorded - selection
+  on a variable plausibly correlated with outcome, which is a real bias, not
+  merely a smaller sample.
 - **Trade frequency is a first-class design constraint.** `ema_trend_v1` trades
   ~19/yr on 4 symbols, so the lab's 100-trade bar sat ~5 years away and no
   verdict could ever arrive. A strategy that cannot be judged in a useful

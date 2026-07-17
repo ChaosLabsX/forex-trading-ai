@@ -6,43 +6,71 @@ consolidated in one place rather than scattered across commit messages.
 ## `TEST_MODE`
 
 Single flag in `.env`, defaults to `true`. Read by `DefaultRiskEngine`
-(`engine/plugins/risk/default_risk_engine.py`):
+(`engine/plugins/risk/default_risk_engine.py`). It selects sizing **style** and
+is **not a safety guard** - on a live account `TEST_MODE=true` is the
+*dangerous* setting. See "Live trading is off behind four independent guards".
 
-- `TEST_MODE=true`: every approved order uses a fixed micro lot
-  (`TEST_MODE_LOT_SIZE = 0.01`), regardless of account size or signal
-  confidence.
-- `TEST_MODE=false`: **not implemented.** `validate_signal()` explicitly
-  refuses to approve any order when `TEST_MODE` is off, rather than silently
-  falling back to the demo sizing. Live position sizing (e.g. % equity risk
-  derived from stop distance) is Phase 6 scope - don't build "live mode" by
-  just flipping this flag without implementing real sizing first.
+- `TEST_MODE=true` (the demo lab): each order uses **the broker's minimum
+  volume for that symbol**, read from `symbol_info` at runtime. Deliberately
+  ignores equity - the lab measures edge in R, and R = `realized_pnl /
+  risk_amount` is invariant to lot size, so the size need only be *placeable*.
+  Per-symbol, **not** a fixed 0.01: that is an FX convention, and index CFDs
+  carry a larger `volume_min` and reject 0.01 outright (retcode 10014
+  INVALID_VOLUME). Found live on MidDE50, 2026-07-17 - the lab had been
+  ignoring contract specs the live path always respected.
+- `TEST_MODE=false` (live): risk-based sizing from stop distance
+  (`engine/sizing.py`), clamped to the broker's `volume_min`/`volume_max`/
+  `volume_step` and checked against free margin. **It is implemented and
+  tested.** An earlier version of this section claimed it was "not
+  implemented", which was false and contradicted this same document's guards
+  section - live trading is off because no strategy has earned it, not because
+  anything is missing.
 
 ## Circuit breakers (`DefaultRiskEngine.validate_signal`)
 
-Checked in this order, any failure blocks the trade:
+| Rail | Scope | Runs on |
+|---|---|---|
+| Max concurrent open trades (`Settings.max_concurrent_trades`, 4) | **per strategy** - each sees only its own positions (`strategy-lab.md`) | both accounts |
+| Consecutive losing trades today (`MAX_CONSECUTIVE_STOP_LOSSES = 3`) | account-wide | **live only** |
+| Max daily loss % (`MAX_DAILY_LOSS_PCT = 3.0`) | account-wide | **live only** |
 
-1. **Max concurrent open trades** (`MAX_CONCURRENT_TRADES = 2`) - counts
-   `Position.status == OPEN` across all instruments/strategies.
-2. **Consecutive losing trades today** (`MAX_CONSECUTIVE_STOP_LOSSES = 3`) -
-   from `AccountState.consecutive_stop_losses_today`, computed by
-   `MT5BrokerAdapter._daily_stats()` from **real** MT5 closed-deal history
-   (today's closing deals, counting backward from the most recent while
-   `profit < 0`). Not an estimate or a placeholder.
-3. **Max daily loss %** (`MAX_DAILY_LOSS_PCT = 3.0`) - from
-   `AccountState.daily_pnl` (also real, same source) as a percentage of
-   balance.
+The two LOSS breakers are gated on `Settings.live_trading_enabled` - the
+explicit real-money switch - and deliberately **not** on `TEST_MODE`, which is
+not a safety signal: a live account left on `TEST_MODE=true` must keep its
+breakers, and does.
 
-All three numbers are recomputed fresh from MT5 on every `get_account_state()`
-call - there's no cached/stale risk state to go wrong here.
+**Why they must not run on the demo lab.** They exist to protect real capital;
+the lab has none. Worse, they corrupt the data the lab exists to produce. A
+blocked signal is never recorded as a trade, and these breakers block
+*precisely during losing streaks* - censoring losers, biasing measured
+expectancy **upward**, and freezing account-wide accumulation toward the
+100-trade bar (one strategy's bad day throttling every other strategy's data,
+re-contaminating the isolation that ownership exists to provide). The
+concurrency cap has no such problem: it is not outcome-correlated, so it
+applies on both accounts.
 
-## AI review is shadow-mode only
+The loss figures are recomputed fresh from **real** MT5 closed-deal history on
+every `get_account_state()` (`MT5BrokerAdapter._daily_stats()`, counting
+backward from the most recent close while `profit < 0`) - never cached or
+estimated.
 
-`ClaudeAIProvider` (Phase 5) reviews every fired signal and logs a verdict to
-`ai_reviews`, but **the verdict never gates execution**. A trade proceeds or
-doesn't based purely on `RiskEngine`'s decision. This is deliberate per the
-original plan (build a track record before trusting it to block trades) - if
-this ever changes, it's a real architectural decision worth flagging clearly
-before implementing, not a quiet default.
+## AI review is shadow-mode only - and live-only
+
+`ClaudeAIProvider` reviews a fired signal and logs a verdict to `ai_reviews`,
+but **the verdict never gates execution**: the trade proceeds or doesn't purely
+on `RiskEngine`'s decision, which has already run by the time the review fires.
+Deliberate - build a track record before trusting it to block trades. If that
+ever changes it is a real architectural decision worth flagging loudly, not a
+quiet default.
+
+It also runs **only when `live_trading_enabled`** (`EngineLoop._review_with_ai`).
+Each review costs an Opus API call per fired signal, which only earns its keep
+where a track record against real-money outcomes could one day justify letting
+it gate trades; on the demo lab it billed continuously for opinions nothing
+consumes. Nothing reads `ai_reviews` except the dashboard's display column -
+not the evaluator, not the risk engine, not any strategy - so skipping it on
+demo changes no trade and no readiness verdict. It resumes by itself when live
+is enabled.
 
 ## RLS / dashboard security model
 
@@ -160,6 +188,60 @@ existed the whole time and never fired because nothing could detect the fault.
 adapter can detect drift and refuse, but cannot log back in - it will alert and
 stay down until a human fixes the terminal. That is the correct failure, not a
 good one.
+
+## ...and then `connect()` crashed on its own log line, undoing all of it
+
+Found 2026-07-17, and it had been live since the fix above was written.
+`mt5_broker.py` referenced `logger` on two lines but never imported `logging`
+or defined it, so `connect()` raised `NameError: name 'logger' is not defined`
+at the `attached: account ...` line - which sits **after** `mt5.initialize()`
+and `account_info()` succeed, but **before** `_verify_server()`,
+`_bind_account()`, and the server-time offset measurement.
+
+The loop caught it as a connect failure and retried. On the next tick
+`is_connected()` returned `True` - it returns `True` while `_bound_login is
+None` ("never connected yet - nothing to compare against") - so the engine
+**limped onward and traded** with three properties silently off:
+
+- the wrong-server refusal never ran;
+- the account was never pinned, so `is_connected()` could never detect drift -
+  the exact protection the section above exists to provide;
+- `_server_utc_offset_seconds` stayed at its `0.0` default, reintroducing the
+  ~3h server-time-as-UTC error and skewing the circuit breakers' "today".
+
+Two lessons worth more than the fix:
+
+- **A green compile is not a green run.** `py_compile` passes on this - a
+  NameError is a runtime fault. This is the same trap as the deleted file that
+  compiled clean (see `CLAUDE.md` rule 6).
+- **Tail the startup, not just recent activity.** It was invisible for days
+  because every check looked at the *latest* log lines, where a limping engine
+  and a healthy one are indistinguishable. The failure only appears in the
+  first two seconds after a restart.
+
+## The watchdog: silence is not health
+
+A dead lab and a lab with nothing to report both produce **silence**, so "no
+READY alert yet" and "the engine died three days ago" were indistinguishable
+from a phone. The engine cannot announce its own death: a crash, a logged-out
+terminal, or a hung loop all just stop.
+
+`infra/watchdog.ps1` is a scheduled task (every 5 min, as SYSTEM - no
+interactive session needed, so it survives logoff) that reads the newest
+heartbeat per **enabled** account straight from Supabase and alerts on Telegram
+when one goes stale: one alert on silence, an hourly reminder while it
+persists, one all-clear on recovery. If it cannot reach Supabase it alerts
+about **that** - blind is not all-clear.
+
+It shares nothing with the engine but `.env`: no Python, no venv, no MT5, and
+it delivers Telegram itself rather than through the engine's notifier - a
+watchdog routed through the thing it watches is not a watchdog. Watching
+*enabled* accounts means it covers the live account automatically the day
+`accounts.enabled` flips, with nothing to remember.
+
+Heartbeats are only sent while `self._connected`, so a broker that never
+connects reads as silence - which is correct, and is exactly what the section
+above would have surfaced in five minutes instead of days.
 
 **Read this before installing the live terminal.** `MT5_TERMINAL_PATH` is also
 empty for the demo engine, so a bare `mt5.initialize()` attaches to whichever

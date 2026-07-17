@@ -46,7 +46,7 @@ not a rewrite. See the research log for why that is a real but premature move.)
 (`engine/registry.py` + `config/plugins.yaml`) - core code never imports a
 concrete plugin. `engine/loop.py` is the running process: connect → refresh
 candles → evaluate each strategy against **its own** positions → risk-check →
-execute → manage stops → reconcile closures → AI review (shadow) → grade
+execute → manage stops → reconcile closures → AI review (shadow, live-only) → grade
 strategies → poll for dashboard commands. Behaviour is driven at runtime by
 **registries in Supabase** (accounts, strategies, strategy_accounts), so
 dashboard toggles and evaluator verdicts land on a live engine with no redeploy.
@@ -85,7 +85,7 @@ dashboard toggles and evaluator verdicts land on a live engine with no redeploy.
 1. **Never generate strategy variants until one passes a backtest.** 60+ tests have produced *fewer* significant results than chance predicts. Mining harder manufactures a false positive - the one that gets funded and loses.
 2. **Never lower the READY bar** to make something qualify.
 3. **Never weaken a live guard** without the user explicitly asking, in that session. There are four, all off by default: `LIVE_TRADING_ENABLED`, `accounts.enabled`, `strategy_accounts.enabled`, `readiness == 'ready'`.
-4. **`TEST_MODE` is not a safety guard.** It selects sizing style (`true` = demo micro-lot, `false` = real risk-based sizing). On a live account `TEST_MODE=true` is the *dangerous* setting.
+4. **`TEST_MODE` is not a safety guard.** It selects sizing style (`true` = the broker's minimum volume for that symbol, for the lab; `false` = real risk-based sizing). On a live account `TEST_MODE=true` is the *dangerous* setting.
 5. **Screen with `scripts/backtest.py` before the lab.** Minutes vs months.
 6. **Verify by exercising the real code path.** This repo has a history of green checks on broken things: `py_compile` passed on a *deleted* file; a backtest hardcoded to the wrong timeframes reported "no trades" instead of failing. Run the thing.
 

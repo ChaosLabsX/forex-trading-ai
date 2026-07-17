@@ -27,10 +27,11 @@ own restart-on-failure settings replace what NSSM would have provided.
 
 ## Checklist
 
-Consolidated to 5 steps - 2 scripts (one committed, one given directly in
-chat since it carries real secrets) plus 3 things that must stay manual
+Six steps to a running, self-watching lab - 2 scripts (one committed, one given
+directly in chat since it carries real secrets), 3 things that must stay manual
 (no remote-access tool reaches the VPS, and account/Windows passwords are
-deliberately kept out of anything scripted or seen by Claude).
+deliberately kept out of anything scripted or seen by Claude), and the watchdog
+registration. Steps 7-8 are optional/cleanup.
 
 ### 1. Run the bootstrap script
 
@@ -79,17 +80,55 @@ Scheduled Task from `infra/setup-scheduled-tasks.ps1`, starts the engine
 immediately, and tails the first bit of log output so you can see it connect
 live - all one paste.
 
-### 5. Verify end-to-end
+### 5. Register the watchdog (do not skip - it is the dead-man's switch)
+
+The engine cannot report its own death: a crash, a logged-out terminal, or a
+hung loop all produce the same silence the lab produces when it simply has
+nothing to say. `infra/watchdog.ps1` runs **outside** the engine and alerts on
+Telegram when an enabled account's heartbeat goes stale. Rebuilding the VPS
+without this leaves you unable to tell "no verdict yet" from "dead for three
+days". See [`docs/safety-rails.md`](../docs/safety-rails.md).
+
+Elevated PowerShell, one paste:
+
+```powershell
+$action = New-ScheduledTaskAction -Execute "powershell.exe" `
+  -Argument "-NoProfile -ExecutionPolicy Bypass -File C:\ForexAI\infra\watchdog.ps1"
+$trigger = New-ScheduledTaskTrigger -Once -At (Get-Date) `
+  -RepetitionInterval (New-TimeSpan -Minutes 5) -RepetitionDuration (New-TimeSpan -Days 3650)
+$principal = New-ScheduledTaskPrincipal -UserId "SYSTEM" -LogonType ServiceAccount
+$settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName "ForexAI-Watchdog" -Action $action -Trigger $trigger `
+  -Principal $principal -Settings $settings -Force
+
+Start-ScheduledTask -TaskName "ForexAI-Watchdog"
+Start-Sleep -Seconds 10
+Get-Content C:\ForexAI\logs\watchdog.log -Tail 3
+```
+
+Expect `OK icmarkets-demo age=0m status=running` and **no** Telegram message -
+the watchdog only speaks when something is wrong or has recovered. It reads
+`C:\ForexAI\.env` for Supabase + Telegram, so step 4 must be done first. Runs
+as SYSTEM, so it survives logoff; `-DryRun` logs what it *would* send without
+sending.
+
+To prove it actually fires, stop the engine for ~10 minutes and confirm a 🚨
+arrives - the only test that distinguishes a working watchdog from a silent one.
+
+### 6. Verify end-to-end
 
 - Confirm `logs\engine-icmarkets-demo.log` showed a clean connect + first heartbeat (the
-  previous script's tail should already show this).
+  previous script's tail should already show this). Read the **startup** lines,
+  not just recent activity: look for `attached: account <n> (<server>)` with no
+  `reconnect failed` after it. A limping engine and a healthy one are
+  indistinguishable further down the log (see `safety-rails.md`).
 - Check the dashboard - the Engine tile should flip to LIVE within ~60s.
 - Reboot the VPS (`Restart-Computer`) once, wait a few minutes, and confirm
   the terminal + engine both come back on their own (proves auto-login +
   Task Scheduler are wired correctly) - this is the actual test of "survives
   a reboot," not just reading the config.
 
-### 6. (Optional) Add the LIVE account's second engine
+### 7. (Optional) Add the LIVE account's second engine
 
 Only when you want the live half running. It is safe to do now: the live engine
 connects, heartbeats and reports, and **places no orders** - four independent
@@ -125,7 +164,7 @@ Expect the log to say the account is blocked - that is the design working, not a
 fault. The dashboard's Accounts section will show the live engine alongside the
 demo one.
 
-### 7. Stop the local engine
+### 8. Stop the local engine
 
 Once the VPS engine is confirmed running, **do not also run it locally at the
 same time** - two independent instances evaluating the same strategy against
