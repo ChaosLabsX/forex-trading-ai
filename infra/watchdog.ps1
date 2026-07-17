@@ -45,6 +45,15 @@ param(
 $ErrorActionPreference = "Stop"
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# Built from code points, NOT literals. PowerShell 5.1 reads a .ps1 without a
+# UTF-8 BOM as the system codepage, which turns "*" into mojibake at PARSE time
+# - "\U0001F6A8" arrived in Telegram as "ðŸš¨". Constructing
+# them at runtime is immune to how this file is saved, committed, or checked out.
+# The icon is the signal here (alarm vs all-clear at a glance), so it has to survive.
+$E_ALARM = [char]::ConvertFromUtf32(0x1F6A8)  # rotating light
+$E_OK    = [char]::ConvertFromUtf32(0x2705)   # white heavy check mark
+$SEP     = [string][char]0x00B7               # middle dot
+
 function Write-Log([string]$text) {
     $line = "{0:u} {1}" -f (Get-Date).ToUniversalTime(), $text
     try { Add-Content -Path $LogFile -Value $line } catch {}
@@ -64,8 +73,16 @@ $base = $cfg['SUPABASE_URL'].TrimEnd('/')
 
 function Send-Alert([string]$text) {
     if ($DryRun) { Write-Log ("DRYRUN would send: " + ($text -replace "`n", " / ")); return }
-    Invoke-RestMethod -Method Post -Uri "https://api.telegram.org/bot$($cfg['TELEGRAM_BOT_TOKEN'])/sendMessage" `
-        -Body @{ chat_id = $cfg['TELEGRAM_CHAT_ID']; text = $text } | Out-Null
+    # Telegram speaks UTF-8. Invoke-RestMethod with a hashtable body encodes
+    # using the system codepage in PS 5.1, which mangles anything non-ASCII, so
+    # send JSON encoded to UTF-8 bytes explicitly rather than letting PowerShell
+    # choose. Belt-and-braces with the code-point constants above: one protects
+    # the characters at parse time, this protects them on the wire.
+    $payload = @{ chat_id = $cfg['TELEGRAM_CHAT_ID']; text = $text } | ConvertTo-Json -Compress
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($payload)
+    Invoke-RestMethod -Method Post `
+        -Uri "https://api.telegram.org/bot$($cfg['TELEGRAM_BOT_TOKEN'])/sendMessage" `
+        -Body $bytes -ContentType 'application/json; charset=utf-8' | Out-Null
 }
 
 # --- state: what we've already alerted about, so silence isn't spammed -------
@@ -108,7 +125,7 @@ try {
     $accounts = @(Invoke-RestMethod -Uri "$base/rest/v1/accounts?enabled=eq.true&select=key" -Headers $headers)
 } catch {
     if (Should-Alert $blind) {
-        Send-Alert "🚨 WATCHDOG BLIND`ncannot reach Supabase - engine state unknown`n$($_.Exception.Message)"
+        Send-Alert "$E_ALARM WATCHDOG BLIND`ncannot reach Supabase - engine state unknown`n$($_.Exception.Message)"
         $blind.down = $true
         $blind.lastAlertUtc = [DateTimeOffset]::UtcNow.ToString("o")
     }
@@ -117,7 +134,7 @@ try {
     exit 1
 }
 if ($blind.down) {
-    Send-Alert "✅ WATCHDOG OK`nSupabase reachable again"
+    Send-Alert "$E_OK WATCHDOG OK`nSupabase reachable again"
     $blind.down = $false
     $blind.lastAlertUtc = ""
 }
@@ -141,14 +158,14 @@ foreach ($account in $accounts) {
 
     if ($stale) {
         if (Should-Alert $entry) {
-            Send-Alert "🚨 ENGINE SILENT  ·  $($key.ToUpper())`nno heartbeat for $ageText (threshold ${StaleMinutes}m)`ncheck the VPS: task state, Get-Process python, MT5 login"
+            Send-Alert "$E_ALARM ENGINE SILENT  $SEP  $($key.ToUpper())`nno heartbeat for $ageText (threshold ${StaleMinutes}m)`ncheck the VPS: task state, Get-Process python, MT5 login"
             $entry.down = $true
             $entry.lastAlertUtc = [DateTimeOffset]::UtcNow.ToString("o")
         }
         Write-Log "SILENT $key age=$ageText"
     } else {
         if ($entry.down) {
-            Send-Alert "✅ ENGINE BACK  ·  $($key.ToUpper())`nheartbeat resumed ($ageText ago)"
+            Send-Alert "$E_OK ENGINE BACK  $SEP  $($key.ToUpper())`nheartbeat resumed ($ageText ago)"
         }
         $entry.down = $false
         $entry.lastAlertUtc = ""
