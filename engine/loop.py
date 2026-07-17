@@ -20,6 +20,7 @@ from engine.registry import EngineComposition
 from engine.reporting import (
     build_daily_summary,
     engine_event,
+    execution_failed,
     format_readiness_change,
     parse_daily_time,
     stop_protected,
@@ -672,14 +673,18 @@ class EngineLoop:
 
         try:
             position = execution_engine.execute(approved_order, broker)
-        except Exception:
+        except Exception as exc:
             logger.exception("order execution failed for %s %s", strategy_name, approved_order.signal.symbol)
             position = self._find_orphaned_position(broker, approved_order, positions_before)
             if position is None:
+                # The broker's own words, not "see logs" - the alert has to be
+                # judgeable on sight (engine/reporting.py::execution_failed).
                 _notify_all(
                     self._engine,
                     "execution_failed",
-                    f"{strategy_name} {approved_order.signal.symbol}: order placement failed, see logs",
+                    execution_failed(
+                        approved_order.signal, strategy_name, self._account_label(), str(exc)
+                    ),
                 )
                 return
             logger.warning(

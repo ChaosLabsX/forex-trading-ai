@@ -120,6 +120,25 @@ def trade_closed(symbol: str, direction, breakdown, strategy: str, account: str)
     )
 
 
+def execution_failed(signal, strategy: str, account: str, reason: str) -> str:
+    """An order the risk engine approved and the broker then refused.
+
+    The reason goes on the FACE of the alert. "order placement failed, see
+    logs" is not a report, it is a homework assignment: it cost a multi-step
+    dig through retcodes and symbol specs to learn that MidDE50's minimum stop
+    distance exceeds its ATR stop. These are not all equal - "market closed"
+    or "requote" are noise to ignore, while "not enough money" or "trading is
+    disabled" want you now, and "invalid stops"/"invalid volume" usually mean
+    the instrument is structurally untradeable (see docs/research-log.md). The
+    reader can only tell those apart if the reason is here, so it is."""
+    return _line(
+        "⚠️",
+        f"ORDER REJECTED  ·  {signal.symbol} {signal.direction.value}",
+        f"{strategy}  ·  {account}",
+        reason,
+    )
+
+
 def stop_protected(position, strategy: str, account: str) -> str:
     """Sent ONCE per trade, the moment its stop reaches entry.
 

@@ -30,6 +30,48 @@ class MT5ConnectionError(RuntimeError):
     pass
 
 
+# What MT5's trade retcodes actually mean. The bare number is unreadable in an
+# alert: "10016" costs a lookup, "invalid stops" is judgeable on sight - and
+# the point of an alert is to be actionable without forensics. Unknown codes
+# fall through to the raw number rather than being guessed at.
+_RETCODE_MEANING = {
+    10004: "requote",
+    10006: "rejected by the broker",
+    10013: "invalid request",
+    10014: "invalid volume for this symbol",
+    10015: "invalid price",
+    10016: "invalid stops - SL/TP too close to price, or on the wrong side",
+    10017: "trading is disabled for this symbol",
+    10018: "market closed",
+    10019: "not enough money",
+    10020: "price changed",
+    10021: "no quotes for this symbol right now",
+    10024: "too many requests",
+    10027: "autotrading is disabled in the terminal",
+    10030: "unsupported filling mode",
+    10031: "no connection to the trade server",
+    10034: "volume limit reached for this symbol",
+}
+
+
+def _trade_error(action: str, result) -> str:
+    """One readable line for a refused trade request.
+
+    Reports the RETCODE, which is the authoritative reason. Deliberately drops
+    mt5.last_error() when a retcode exists: it describes the API call, not the
+    trade, and reads "[1] Success" next to a rejection - which actively misled
+    a live diagnosis of a MidDE50 rejection. last_error() is only the real
+    signal when order_send returned nothing at all."""
+    if result is None:
+        code, message = mt5.last_error()
+        return f"{action} returned nothing from MT5: [{code}] {message}"
+    retcode = getattr(result, "retcode", None)
+    meaning = _RETCODE_MEANING.get(retcode, "unrecognised retcode")
+    comment = (getattr(result, "comment", "") or "").strip()
+    detail = f" - {comment}" if comment and comment.lower() not in meaning.lower() else ""
+    return f"{action} refused: {meaning} (retcode {retcode}){detail}"
+
+
 class MT5BrokerAdapter(BrokerAdapter):
     """Talks to a locally-running, logged-in MT5 terminal via the MetaTrader5
     IPC package. If MT5_LOGIN/PASSWORD/TERMINAL_PATH aren't set, attaches to
@@ -258,10 +300,7 @@ class MT5BrokerAdapter(BrokerAdapter):
         }
         result = mt5.order_send(request)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-            code, message = mt5.last_error()
-            raise MT5ConnectionError(
-                f"order_send failed: retcode={getattr(result, 'retcode', None)} [{code}] {message}"
-            )
+            raise MT5ConnectionError(_trade_error("order", result))
 
         return Position(
             id=str(result.order),
@@ -296,8 +335,7 @@ class MT5BrokerAdapter(BrokerAdapter):
         }
         result = mt5.order_send(request)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-            code, message = mt5.last_error()
-            raise MT5ConnectionError(f"modify failed: [{code}] {message}")
+            raise MT5ConnectionError(_trade_error("stop modify", result))
         return self._to_position(mt5.positions_get(ticket=ticket)[0])
 
     def close_position(self, position_id: str, volume: float | None = None) -> Position:
@@ -324,8 +362,7 @@ class MT5BrokerAdapter(BrokerAdapter):
         }
         result = mt5.order_send(request)
         if result is None or result.retcode != mt5.TRADE_RETCODE_DONE:
-            code, message = mt5.last_error()
-            raise MT5ConnectionError(f"close failed: [{code}] {message}")
+            raise MT5ConnectionError(_trade_error("close", result))
 
         return Position(
             id=position_id,
