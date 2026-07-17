@@ -7,7 +7,7 @@ import { READINESS, readinessGates } from "../lib/useStrategyLab";
  * the process, not evidence of an edge. Green here would imply the strategy is
  * doing well simply by trading a lot, which is exactly the misread the research
  * log warns against. */
-export function TradeProgress({ trades }: { trades: number }) {
+export function TradeProgress({ trades, eta }: { trades: number; eta?: string | null }) {
   const target = READINESS.minTradesReady;
   const pct = Math.max(0, Math.min(100, (trades / target) * 100));
   const tickPct = (READINESS.minTradesAlmost / target) * 100;
@@ -28,6 +28,10 @@ export function TradeProgress({ trades }: { trades: number }) {
         <div className="tprog-fill" style={{ width: `${pct}%` }} />
         <div className="tprog-tick" style={{ left: `${tickPct}%` }} title="30 trades: first verdict" />
       </div>
+      {/* ETA to the sample minimum only - deliberately not "READY in Nd".
+          Reaching 100 trades is a matter of waiting; passing the quality
+          gates is not, and the wording must never conflate the two. */}
+      {eta && <div className="tprog-eta" title="Projected from the last 7 days' counted trades">{eta}</div>}
     </div>
   );
 }

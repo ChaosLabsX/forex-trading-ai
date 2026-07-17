@@ -804,6 +804,13 @@ input:focus {
   transform: translateX(-1px);
 }
 
+.tprog-eta {
+  font-size: 11px;
+  color: var(--ink-muted);
+  margin-top: 4px;
+  white-space: nowrap;
+}
+
 .gates {
   list-style: none;
   margin: 0;

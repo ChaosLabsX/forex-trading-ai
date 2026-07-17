@@ -1,6 +1,13 @@
 import type { Trade, Strategy, StrategyEvaluation } from "../types";
 import type { AccountHealth } from "../lib/useDashboardData";
-import { latestEvaluation, rankStrategies, readinessGates, READINESS } from "../lib/useStrategyLab";
+import {
+  fmtEta,
+  latestEvaluation,
+  rankStrategies,
+  readinessGates,
+  READINESS,
+  verdictEta,
+} from "../lib/useStrategyLab";
 import { fmtStrategyName } from "../lib/format";
 
 type Props = {
@@ -8,13 +15,16 @@ type Props = {
   openTrades: Trade[];
   strategies: Strategy[];
   evaluations: StrategyEvaluation[];
+  /** The lab's closed trades (from useStrategyLab), for the leader's trade-rate
+   * ETA - NOT the account-filtered list. */
+  closedTrades: Trade[];
   /** Always the DEMO lab, never the filtered account: verdicts derive from the
    * lab by definition, so these tiles must not change meaning when the account
    * filter moves. */
   labAccountKey: string | null;
 };
 
-export function StatTiles({ health, openTrades, strategies, evaluations, labAccountKey }: Props) {
+export function StatTiles({ health, openTrades, strategies, evaluations, closedTrades, labAccountKey }: Props) {
   // Headline the engines that are meant to be running; per-account detail lives
   // in the Accounts section.
   const expected = health.filter((h) => h.account.enabled);
@@ -72,6 +82,10 @@ export function StatTiles({ health, openTrades, strategies, evaluations, labAcco
   const leaderGates = readinessGates(leaderEval);
   const leaderGatesMet = leaderGates.filter((g) => g.met).length;
   const leaderTrades = leaderEval?.trades_count ?? 0;
+  const leaderEta =
+    leader && labAccountKey && leaderEval
+      ? verdictEta(closedTrades, leader.name, labAccountKey, leaderEval.trades_count)
+      : null;
 
   return (
     <div className="tiles">
@@ -117,7 +131,8 @@ export function StatTiles({ health, openTrades, strategies, evaluations, labAcco
         </div>
         <div className="tile-sub">
           {leader
-            ? `${leaderTrades} / ${READINESS.minTradesReady} trades · ${leaderGatesMet}/${leaderGates.length} checks passed`
+            ? `${leaderTrades} / ${READINESS.minTradesReady} trades · ${leaderGatesMet}/${leaderGates.length} checks passed` +
+              (leaderEta ? ` · ${fmtEta(leaderEta)}` : "")
             : "No strategies registered"}
         </div>
       </div>

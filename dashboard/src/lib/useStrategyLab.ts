@@ -49,6 +49,63 @@ export function readinessGates(e: StrategyEvaluation | null): Gate[] {
   ];
 }
 
+export type VerdictEta = { perDay: number; days: number };
+
+const DAY_MS = 86_400_000;
+/** Rate window: recent enough to reflect the CURRENT trade rate (a config
+ * change like widening the instrument list changes the rate overnight), long
+ * enough to smooth the weekend, when FX markets close and every strategy's
+ * rate legitimately drops to zero. */
+const ETA_WINDOW_DAYS = 7;
+
+/** Projects when a strategy reaches the 100-trade minimum, from its recent
+ * counted-trade rate. Counts exactly what the evaluator counts (closed, real
+ * P&L, recorded risk, not voided) so the projection can't drift from the
+ * number it projects. Returns null rather than guessing when: the minimum is
+ * already met, there's nothing to extrapolate from, or nothing closed in the
+ * window (a stalled strategy gets no ETA - extrapolating stale data would
+ * promise a verdict that isn't coming).
+ *
+ * This is an ETA to the SAMPLE gate only, deliberately. The other four gates
+ * are quality tests the strategy passes or fails on its merits - projecting
+ * "READY in N days" would imply the verdict is a matter of waiting, which is
+ * exactly the misread this dashboard exists to prevent. */
+export function verdictEta(
+  closedTrades: Trade[],
+  strategyName: string,
+  accountKey: string,
+  countedSoFar: number
+): VerdictEta | null {
+  if (countedSoFar >= READINESS.minTradesReady) return null;
+  const counted = closedTrades.filter(
+    (t) =>
+      t.strategy_name === strategyName &&
+      t.account_key === accountKey &&
+      t.closed_at !== null &&
+      t.realized_pnl !== null &&
+      t.risk_amount !== null &&
+      t.risk_amount !== 0 &&
+      !t.void_reason
+  );
+  if (counted.length === 0) return null;
+  const now = Date.now();
+  const windowStart = now - ETA_WINDOW_DAYS * DAY_MS;
+  const recent = counted.filter((t) => new Date(t.closed_at as string).getTime() >= windowStart);
+  if (recent.length === 0) return null;
+  const firstTs = Math.min(...counted.map((t) => new Date(t.closed_at as string).getTime()));
+  // A lab younger than the window divides by its actual age, floored so a
+  // burst of trades in the first hour doesn't extrapolate to an absurd rate.
+  const spanDays = Math.max((now - Math.max(firstTs, windowStart)) / DAY_MS, 0.25);
+  const perDay = recent.length / spanDays;
+  return { perDay, days: (READINESS.minTradesReady - countedSoFar) / perDay };
+}
+
+export function fmtEta(eta: VerdictEta): string {
+  const rate = eta.perDay >= 10 ? eta.perDay.toFixed(0) : eta.perDay.toFixed(1);
+  const days = eta.days > 365 ? ">1y" : eta.days < 1 ? "<1d" : `~${Math.round(eta.days)}d`;
+  return `~${rate}/day · ${days} to ${READINESS.minTradesReady}`;
+}
+
 /** Strategy-lab data: registries + the latest evaluation snapshot per
  * (strategy, account). Kept separate from useDashboardData so the lab can poll
  * on its own, slower cadence - evaluations only change every 30 min. */

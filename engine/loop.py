@@ -105,6 +105,14 @@ class EngineLoop:
         self._logged_blocks: dict[str, str] = {}
         # broker ticket -> owning strategy, refreshed each cycle from `trades`
         self._ticket_owner: dict[str, str] = {}
+        # (symbol, timeframe) -> time of the newest candle already persisted.
+        # Upserting the full window every 60s re-wrote ~16,000 identical rows
+        # a minute (300 H1 + 250 H4 + 90 D1 per symbol, ~25 symbols); after the
+        # first full pass only the still-forming bar and any newly closed bars
+        # have changed, so only candles >= this mark are sent. In-memory on
+        # purpose: a restart just repeats one full upsert per symbol/timeframe,
+        # which doubles as gap backfill for however long the engine was down.
+        self._last_persisted_bar: dict[tuple[str, Timeframe], datetime] = {}
         self._paused = False
         # Instruments are whatever the configured strategies actually ask for -
         # never a second hardcoded list to fall out of sync with them. Widening a
@@ -323,12 +331,25 @@ class EngineLoop:
                     candles = market_data.get_candles(symbol, timeframe, CANDLE_COUNT[timeframe])
                     if not candles:
                         continue
-                    self._supabase.upsert(
-                        "candles",
-                        [_candle_row(c) for c in candles],
-                        on_conflict="symbol,timeframe,time",
+                    # Persist only what can have changed since the last pass:
+                    # the still-forming bar plus any bars that closed since.
+                    # First pass after a start has no mark and sends the full
+                    # window - that is also what backfills a gap after downtime.
+                    mark = self._last_persisted_bar.get((symbol, timeframe))
+                    to_persist = candles if mark is None else [c for c in candles if c.time >= mark]
+                    if to_persist:
+                        self._supabase.upsert(
+                            "candles",
+                            [_candle_row(c) for c in to_persist],
+                            on_conflict="symbol,timeframe,time",
+                        )
+                    # Advance the mark only after a successful upsert, so a
+                    # failed write is retried next cycle instead of skipped.
+                    self._last_persisted_bar[(symbol, timeframe)] = candles[-1].time
+                    logger.info(
+                        "refreshed %s %s: %d candles (%d persisted)",
+                        symbol, timeframe.value, len(candles), len(to_persist),
                     )
-                    logger.info("refreshed %s %s: %d candles", symbol, timeframe.value, len(candles))
                     candles_by_timeframe[timeframe] = _closed_only(candles)
                 except Exception:
                     logger.exception("failed to refresh candles for %s %s", symbol, timeframe.value)

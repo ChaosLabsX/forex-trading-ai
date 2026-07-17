@@ -1,10 +1,12 @@
 import { Fragment, useState } from "react";
 import type { Account, Readiness, Strategy, StrategyAccount, StrategyEvaluation, Trade } from "../types";
 import {
+  fmtEta,
   latestEvaluation,
   linkFor,
   rankStrategies,
   setStrategyEnabled,
+  verdictEta,
 } from "../lib/useStrategyLab";
 import { StrategyReport } from "./StrategyReport";
 import { GateList, TradeProgress } from "./Readiness";
@@ -116,6 +118,12 @@ export function StrategyLab({ accounts, strategies, links, evaluations, closedTr
               const demoLink = labAccount ? linkFor(links, strategy.name, labAccount.key) : null;
               const liveLink = liveAccount ? linkFor(links, strategy.name, liveAccount.key) : null;
               const open = selected === strategy.name;
+              // ETA always projects the LAB's rate - verdicts derive from the
+              // demo account by definition, whatever the account filter shows.
+              const eta =
+                labAccount && evaluation
+                  ? verdictEta(closedTrades, strategy.name, labAccount.key, evaluation.trades_count)
+                  : null;
               return (
                 <Fragment key={strategy.name}>
                   <tr
@@ -131,7 +139,10 @@ export function StrategyLab({ accounts, strategies, links, evaluations, closedTr
                       </span>
                     </td>
                     <td className="cell-num" data-label="Trades">
-                      <TradeProgress trades={evaluation?.trades_count ?? 0} />
+                      <TradeProgress
+                        trades={evaluation?.trades_count ?? 0}
+                        eta={eta ? fmtEta(eta) : null}
+                      />
                     </td>
                     <td className="cell-num" data-label="Win">{fmt(evaluation?.win_rate, 0, "%")}</td>
                     <td className="cell-num" data-label="Expectancy">

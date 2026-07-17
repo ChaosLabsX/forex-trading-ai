@@ -95,6 +95,7 @@ export function Dashboard({ session }: { session: Session }) {
             openTrades={scoped.open}
             strategies={lab.strategies}
             evaluations={lab.evaluations}
+            closedTrades={lab.closedTrades}
             labAccountKey={labAccountKey}
           />
           <StrategyLab
