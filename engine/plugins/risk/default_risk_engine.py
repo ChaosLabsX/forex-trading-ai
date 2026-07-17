@@ -6,13 +6,12 @@ from engine.config import Settings
 from engine.core.interfaces.broker import BrokerAdapter
 from engine.core.interfaces.risk import RiskEngine
 from engine.core.models import AccountState, ApprovedOrder, Position, PositionStatus, RiskDecision, Signal
-from engine.sizing import size_position
+from engine.sizing import size_position, smallest_placeable_lots
 
 logger = logging.getLogger("engine.risk")
 
 MAX_CONSECUTIVE_STOP_LOSSES = 3
 MAX_DAILY_LOSS_PCT = 3.0
-TEST_MODE_LOT_SIZE = 0.01
 
 
 class DefaultRiskEngine(RiskEngine):
@@ -26,9 +25,11 @@ class DefaultRiskEngine(RiskEngine):
     estimates.
 
     Then sizing, which depends on TEST_MODE:
-      * TEST_MODE=true  -> fixed micro lot, for the demo lab. Deliberately
-        ignores equity: the lab is measuring a strategy's edge in R, not
-        compounding an account.
+      * TEST_MODE=true  -> the broker's minimum volume for that symbol, for the
+        demo lab. Deliberately ignores equity: the lab measures a strategy's
+        edge in R, which is invariant to lot size, so size need only be
+        PLACEABLE. Per-symbol, not a fixed 0.01 - that is an FX convention and
+        index CFDs reject it (retcode 10014). See _size_test_mode.
       * TEST_MODE=false -> risk-based sizing from stop distance (engine/sizing.py),
         clamped to the broker's contract specs and checked against free margin.
 
@@ -85,10 +86,39 @@ class DefaultRiskEngine(RiskEngine):
                     )
 
         if self._settings.test_mode:
-            order = ApprovedOrder(signal=signal, lot_size=TEST_MODE_LOT_SIZE, approved_by="default_risk_engine")
-            return RiskDecision(approved=True, reason="within risk limits (TEST_MODE fixed lot)", order=order)
+            return self._size_test_mode(signal, broker)
 
         return self._size_live(signal, account_state, broker, risk_pct)
+
+    def _size_test_mode(self, signal: Signal, broker: BrokerAdapter) -> RiskDecision:
+        """Demo lab: the smallest volume the BROKER accepts for this symbol.
+
+        Deliberately ignores equity - the lab measures edge in R, and R is
+        invariant to lot size, so the only thing size must do here is be
+        placeable.
+
+        This used to send a hardcoded 0.01 for every instrument, which is an FX
+        convention: index CFDs carry a bigger volume_min and MT5 rejected the
+        order outright (retcode 10014 INVALID_VOLUME). Those instruments fired
+        signals that could never become trades, silently shrinking a strategy's
+        real universe below its declared one - found live on MidDE50, and the
+        same class of defect as the XPTUSD stop-distance finding in
+        docs/research-log.md. The live path always respected the broker's
+        contract specs; now the lab does too."""
+        try:
+            limits = broker.get_symbol_limits(signal.symbol)
+        except Exception:
+            logger.exception("failed to read symbol limits for %s", signal.symbol)
+            return RiskDecision(approved=False, reason="could not read contract specs - refusing to size blind")
+        if limits is None:
+            return RiskDecision(approved=False, reason=f"broker knows no symbol {signal.symbol}")
+
+        result = smallest_placeable_lots(limits)
+        if result.lots is None:
+            return RiskDecision(approved=False, reason=f"not sized: {result.reason}")
+
+        order = ApprovedOrder(signal=signal, lot_size=result.lots, approved_by="default_risk_engine")
+        return RiskDecision(approved=True, reason=f"within risk limits (TEST_MODE, {result.reason})", order=order)
 
     def _size_live(
         self, signal: Signal, account_state: AccountState, broker: BrokerAdapter, risk_pct: float | None

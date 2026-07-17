@@ -40,6 +40,28 @@ def _decimals(step: float) -> int:
     return len(text.split(".")[1]) if "." in text else 0
 
 
+def smallest_placeable_lots(limits: SymbolLimits) -> SizingResult:
+    """The smallest volume THIS broker accepts for THIS symbol.
+
+    What the demo lab actually needs from a lot size is only that it be
+    placeable: the lab measures edge in R, and R = pnl / risk_amount is
+    invariant to size, so a bigger or smaller position changes no statistic.
+
+    A hardcoded 0.01 is an FX convention, not a universal minimum. Index CFDs
+    carry a larger volume_min, and MT5 rejects anything under it outright
+    (retcode 10014 INVALID_VOLUME) - so those instruments could fire signals
+    forever and never record a single trade, shrinking a strategy's real
+    universe below its declared one without a word. Found live on MidDE50.
+    Contract specs are the broker's to state, exactly as size_position()
+    already treats them on the live path."""
+    if limits.volume_step <= 0:
+        return SizingResult(None, "broker reported no volume step for this symbol", None)
+    if limits.volume_min <= 0:
+        return SizingResult(None, "broker reported no minimum volume for this symbol", None)
+    lots = round(limits.volume_min, _decimals(limits.volume_step))
+    return SizingResult(lots, f"broker minimum {lots} lot", None)
+
+
 def size_position(
     equity: float,
     risk_pct: float,
