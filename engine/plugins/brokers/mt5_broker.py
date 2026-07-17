@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta, timezone
 
 import MetaTrader5 as mt5
@@ -9,6 +10,15 @@ from engine.core.interfaces.broker import BrokerAdapter
 from engine.core.models import AccountState, ClosedTradePnl, Direction, Position, PositionStatus
 from engine.sizing import SymbolLimits
 from engine.plugins.brokers.mt5_time import measure_server_utc_offset_seconds, server_epoch_to_utc
+
+# connect() and _verify_server() both log through this; it was referenced on two
+# lines but never defined, so connect() raised NameError at the "attached:
+# account ..." line - AFTER initialize() but BEFORE _verify_server/_bind_account
+# and the server-time offset. The loop then limped on via is_connected() (True
+# while _bound_login is None), trading with those three safety/correctness steps
+# silently skipped. py_compile never caught it because a NameError is a runtime
+# fault. See docs/safety-rails.md.
+logger = logging.getLogger("engine.broker")
 
 _ORDER_TYPE = {
     Direction.LONG: mt5.ORDER_TYPE_BUY,
