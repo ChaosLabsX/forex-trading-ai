@@ -563,8 +563,12 @@ class EngineLoop:
 
             self._last_evaluated_bar[dedupe_key] = latest_closed_bar_time
 
-            risk_approved = None
-            risk_reason = None
+            # Log the signal FIRST, so a resulting trade can carry its signal_id -
+            # the key that later joins the trade's realized outcome back to Claude's
+            # shadow review of it. The risk decision isn't known yet; it's written
+            # onto the signal row by _update_signal_risk once routing returns.
+            signal_id = self._log_signal(strategy.name, symbol, evaluation)
+
             if evaluation.signal is not None:
                 logger.info("SIGNAL fired: %s %s %s", strategy.name, symbol, evaluation.signal.direction.value)
                 # No Telegram for a fired signal: it is immediately followed by
@@ -574,15 +578,13 @@ class EngineLoop:
                 # strategy rather than being a shared pool they race for -
                 # whoever lost that race had a signal silently dropped.
                 risk_approved, risk_reason = self._route_through_risk_engine(
-                    strategy.name, evaluation.signal, account_state, own_positions
+                    strategy.name, evaluation.signal, account_state, own_positions, signal_id
                 )
+                self._update_signal_risk(signal_id, risk_approved, risk_reason)
+                if signal_id is not None:
+                    self._review_with_ai(signal_id, evaluation.signal, context)
             else:
                 logger.info("no signal: %s %s - %s", strategy.name, symbol, evaluation.reason)
-
-            signal_id = self._log_signal(strategy.name, symbol, evaluation, risk_approved, risk_reason)
-
-            if evaluation.signal is not None and signal_id is not None:
-                self._review_with_ai(signal_id, evaluation.signal, context)
 
     def _review_with_ai(self, signal_id: int, signal, context: StrategyContext) -> None:
         """Shadow mode: logs Claude's opinion for later comparison, never
@@ -629,7 +631,9 @@ class EngineLoop:
         except Exception:
             logger.exception("failed to persist AI review for signal %s", signal_id)
 
-    def _route_through_risk_engine(self, strategy_name: str, signal, account_state, open_positions) -> tuple:
+    def _route_through_risk_engine(
+        self, strategy_name: str, signal, account_state, open_positions, signal_id=None
+    ) -> tuple:
         risk_engine = self._engine.risk_engine
         broker = self._engine.broker
         if risk_engine is None:
@@ -653,11 +657,26 @@ class EngineLoop:
             logger.info("signal rejected by risk engine: %s %s - %s", strategy_name, signal.symbol, decision.reason)
             _notify_all(self._engine, "signal_rejected", f"{strategy_name} {signal.symbol}: {decision.reason}")
         elif decision.order is not None:
-            self._open_trade(strategy_name, decision.order)
+            self._open_trade(strategy_name, decision.order, signal_id)
 
         return decision.approved, decision.reason
 
-    def _open_trade(self, strategy_name: str, approved_order) -> None:
+    def _update_signal_risk(self, signal_id, approved, reason) -> None:
+        """Write the risk decision back onto the signal row. The signal is logged
+        before the decision is known (so a trade can carry its signal_id), so the
+        risk_approved/risk_reason columns are filled in here, after routing."""
+        if signal_id is None:
+            return
+        try:
+            self._supabase.update(
+                "signals",
+                {"id": f"eq.{signal_id}"},
+                {"risk_approved": approved, "risk_reason": reason},
+            )
+        except Exception:
+            logger.exception("failed to record risk decision on signal %s", signal_id)
+
+    def _open_trade(self, strategy_name: str, approved_order, signal_id=None) -> None:
         broker = self._engine.broker
         execution_engine = self._engine.execution_engine
         if broker is None or execution_engine is None:
@@ -698,7 +717,7 @@ class EngineLoop:
                 f"error - recovered as ticket {position.id}.",
             )
 
-        self._persist_opened_trade(strategy_name, position)
+        self._persist_opened_trade(strategy_name, position, signal_id)
 
     @staticmethod
     def _find_orphaned_position(broker, approved_order, positions_before: set) -> Position | None:
@@ -732,7 +751,7 @@ class EngineLoop:
         distance = abs(position.entry_price - position.stop_loss)
         return distance * value_per_price * position.lot_size
 
-    def _persist_opened_trade(self, strategy_name: str, position) -> None:
+    def _persist_opened_trade(self, strategy_name: str, position, signal_id=None) -> None:
         risk_amount = self._risk_amount(position)
         if risk_amount is None:
             logger.warning(
@@ -746,6 +765,10 @@ class EngineLoop:
                     {
                         "mt5_ticket": position.id,
                         "strategy_name": strategy_name,
+                        # The signal this trade was opened from - the key that joins
+                        # its realized outcome to Claude's shadow review. NULL for
+                        # orphan-recovered trades (no signal row to point at).
+                        "signal_id": signal_id,
                         "symbol": position.symbol,
                         "direction": position.direction.value,
                         "lot_size": position.lot_size,
