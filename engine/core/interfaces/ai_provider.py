@@ -21,4 +21,16 @@ class AIProvider(ABC):
         ...
 
     @abstractmethod
-    def review_signal(self, signal: Signal, context: StrategyContext) -> AIVerdict: ...
+    def review_signal(
+        self, signal: Signal, context: StrategyContext, track_record: str | None = None
+    ) -> AIVerdict:
+        """Review one candidate signal.
+
+        `track_record` is a rendering of how this reviewer's own past verdicts
+        turned out, computed in code by engine/review_scoring.py - never by the
+        model about itself. Optional so a provider can ignore it and so the
+        caller can pass nothing before any record exists. Arrives as a method
+        parameter, not constructor config, for the usual reason in this repo:
+        it is a fact about the world at call time, not a setting.
+        """
+        ...

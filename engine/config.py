@@ -26,6 +26,24 @@ class Settings(BaseSettings):
 
     anthropic_api_key: str | None = None
 
+    # --- Shadow AI review (engine/plugins/ai/, engine/review_scoring.py) ----
+    # The review was previously gated on live_trading_enabled, which meant the
+    # track record could not begin accumulating until the day real money was
+    # already at stake - the one point at which you most want it to already
+    # exist. This switch decouples the two: turn it on to start scoring Claude's
+    # judgement against the demo lab's real fills, months before going live.
+    #
+    # Off by default because it costs an Opus call per reviewed signal and the
+    # lab fires a lot of them. On a LIVE account reviews always run regardless of
+    # this flag - every real-money signal is worth an opinion.
+    ai_review_enabled: bool = False
+    # Fraction of demo signals reviewed, so the cost of a track record is a dial
+    # rather than a surprise. Sampling is random and therefore unbiased: the
+    # scored subset stays representative of all signals, which is the only
+    # property the comparison in review_scoring.py actually needs. Ignored on a
+    # live account (100% there).
+    ai_review_sample_pct: float = 10.0
+
     # Which account row (public.accounts.key) this engine process IS. One engine
     # process serves exactly one account; the live engine runs with its own .env
     # setting ACCOUNT_KEY=icmarkets-live. Everything this process writes is

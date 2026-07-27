@@ -46,7 +46,7 @@ not a rewrite. See the research log for why that is a real but premature move.)
 (`engine/registry.py` + `config/plugins.yaml`) - core code never imports a
 concrete plugin. `engine/loop.py` is the running process: connect → refresh
 candles → evaluate each strategy against **its own** positions → risk-check →
-execute → manage stops → reconcile closures → AI review (shadow, live-only) → grade
+execute → manage stops → reconcile closures → AI review (shadow; always live, opt-in+sampled on demo) → grade
 strategies → poll for dashboard commands. Behaviour is driven at runtime by
 **registries in Supabase** (accounts, strategies, strategy_accounts), so
 dashboard toggles and evaluator verdicts land on a live engine with no redeploy.

@@ -51,13 +51,17 @@ class ClaudeAIProvider(AIProvider):
     def model_name(self) -> str:
         return MODEL
 
-    def review_signal(self, signal: Signal, context: StrategyContext) -> AIVerdict:
+    def review_signal(
+        self, signal: Signal, context: StrategyContext, track_record: str | None = None
+    ) -> AIVerdict:
         response = self._client.messages.create(
             model=MODEL,
             max_tokens=512,
             tools=[_VERDICT_TOOL],
             tool_choice={"type": "tool", "name": "submit_verdict"},
-            messages=[{"role": "user", "content": self._build_prompt(signal, context)}],
+            messages=[
+                {"role": "user", "content": self._build_prompt(signal, context, track_record)}
+            ],
         )
         tool_use = next(block for block in response.content if block.type == "tool_use")
         return AIVerdict(
@@ -67,17 +71,26 @@ class ClaudeAIProvider(AIProvider):
         )
 
     @staticmethod
-    def _build_prompt(signal: Signal, context: StrategyContext) -> str:
+    def _build_prompt(
+        signal: Signal, context: StrategyContext, track_record: str | None = None
+    ) -> str:
         account = context.account_state
         risk_distance = abs(signal.entry_price - signal.stop_loss)
         reward_distance = abs(signal.take_profit - signal.entry_price)
         reward_risk_text = f"{reward_distance / risk_distance:.2f}" if risk_distance else "n/a"
+        record_section = f"\n\n{track_record}\n" if track_record else ""
 
         return f"""You are a secondary risk reviewer for an automated forex/CFD trading
 system. A rules-based strategy has produced a candidate trade. You are not
 placing this trade - you are giving a second opinion that will be logged
 alongside the outcome for later comparison. Be honest and skeptical; there is
 no reward for rubber-stamping.
+
+Note what "no reward for rubber-stamping" means concretely here: because your
+verdict does not gate execution, every trade you reject is taken anyway and its
+result recorded. Approving everything is therefore not a safe default - it is
+the one behaviour guaranteed to prove, on the record, that your review adds
+nothing.{record_section}
 
 Signal:
 - Strategy: {signal.strategy_name}

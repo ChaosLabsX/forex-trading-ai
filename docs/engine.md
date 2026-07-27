@@ -44,10 +44,20 @@ For each configured `StrategyPlugin`, for each instrument in its
 2. If a signal fired: `risk_engine.validate_signal(...)` → `RiskDecision`. If
    approved, `_open_trade()` calls `execution_engine.execute(order, broker)`,
    which places the order and inserts a `trades` row with `status=OPEN`.
-3. Either way, `ai_provider.review_signal(signal, context)` runs (shadow mode -
-   this happens regardless of the risk decision, so the `ai_reviews` table lets
-   you compare "what the rules did" vs. "what Claude would have done" after the
-   fact). Logged to `ai_reviews`, linked to the signal's id.
+3. Either way, `ai_provider.review_signal(signal, context, track_record)` runs
+   (shadow mode - this happens regardless of the risk decision, so the
+   `ai_reviews` table lets you compare "what the rules did" vs. "what Claude
+   would have done" after the fact). Logged to `ai_reviews`, linked to the
+   signal's id.
+
+   Whether it runs at all is `_should_review()`: always on a live account, and on
+   the demo lab only when `AI_REVIEW_ENABLED=true`, for a random
+   `AI_REVIEW_SAMPLE_PCT` of signals. `track_record` is
+   `engine/review_scoring.py`'s code-computed summary of how Claude's *own* past
+   verdicts turned out - refreshed on the evaluation cadence, not per signal.
+   See [`safety-rails.md`](safety-rails.md#ai-review-is-shadow-mode-only) for why
+   both arms of that comparison are observable and why that stops being true the
+   moment the reviewer is allowed to gate.
 
 ### Reconciling closed trades
 

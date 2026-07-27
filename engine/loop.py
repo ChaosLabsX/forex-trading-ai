@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import logging
+import random
 import time
 from datetime import date, datetime, timedelta, timezone
 
+from engine import review_scoring
 from engine.config import Settings
 from engine.core.interfaces.strategy import StrategyContext
 from engine.core.models import (
@@ -97,6 +99,11 @@ class EngineLoop:
         self._last_candle_refresh = 0.0
         self._last_manage = 0.0
         self._last_evaluation = 0.0
+        # How Claude's own past verdicts turned out, refreshed on the evaluation
+        # cadence rather than per signal - it changes only when trades close, and
+        # recomputing it per review would add two Supabase round-trips to every
+        # signal to get the same answer.
+        self._review_record = review_scoring.EMPTY_RECORD
         self._last_summary_date: date | None = None
         # (strategy_name, symbol) -> timestamp of the last *closed* entry-timeframe
         # bar we evaluated, so we log each closed bar's outcome exactly once
@@ -198,12 +205,32 @@ class EngineLoop:
     # ---------------------------------------------------- strategy lifecycle
 
     def _run_evaluation(self) -> None:
+        # Refreshed on both account types, and before the lab check: the live
+        # engine reviews every signal, so it is the one that most needs its
+        # reviewer's record to be current.
+        self._refresh_review_record()
         if not self._is_lab():
             return  # only the lab judges readiness
         try:
             self._evaluator.run(on_change=self._on_readiness_change)
         except Exception:
             logger.exception("readiness evaluation failed")
+
+    def _refresh_review_record(self) -> None:
+        """Rescore Claude's shadow verdicts against closed trades. Skipped
+        entirely when no review will ever be asked for, so a deployment with the
+        reviewer off pays nothing for it."""
+        if self._engine.ai_provider is None:
+            return
+        if not (self._settings.live_trading_enabled or self._settings.ai_review_enabled):
+            return
+        record = review_scoring.compute(self._supabase, self._account_key)
+        if record.scored != self._review_record.scored:
+            logger.info(
+                "AI review record: %s scored (%s approved, %s rejected)",
+                record.scored, record.approved.trades_count, record.rejected.trades_count,
+            )
+        self._review_record = record
 
     def _on_readiness_change(self, strategy: dict, previous, evaluation) -> None:
         _notify_all(
@@ -586,26 +613,42 @@ class EngineLoop:
             else:
                 logger.info("no signal: %s %s - %s", strategy.name, symbol, evaluation.reason)
 
+    def _should_review(self) -> bool:
+        """Whether to spend an Opus call reviewing this signal.
+
+        Live: always. Every real-money signal is worth an opinion.
+
+        Demo: only when ai_review_enabled is on, and then only for a random
+        ai_review_sample_pct of signals. This used to be gated on
+        live_trading_enabled alone, which had a circularity worth naming - the
+        track record that would justify trusting the reviewer could not start
+        accumulating until live trading was already on, so the evidence was
+        always going to arrive after the decision it was meant to inform. The
+        lab produces real fills on real prices; scoring against those is what
+        makes going live start with a record instead of a blank page.
+
+        Sampling is random rather than "first N per hour" on purpose: a
+        time-based rule would systematically over-sample quiet sessions, and
+        session is correlated with volatility and therefore with outcome. That
+        biased subset would then be the evidence base for the whole comparison.
+        """
+        if self._settings.live_trading_enabled:
+            return True
+        if not self._settings.ai_review_enabled:
+            return False
+        return random.random() < (self._settings.ai_review_sample_pct / 100.0)
+
     def _review_with_ai(self, signal_id: int, signal, context: StrategyContext) -> None:
         """Shadow mode: logs Claude's opinion for later comparison, never
         gates execution - RiskEngine's decision already ran before this."""
         ai_provider = self._engine.ai_provider
-        if ai_provider is None:
-            return
-        # Live only. The shadow review costs an Opus API call per fired signal;
-        # it only earns that on a live account, where a track record of its
-        # opinions against real-money outcomes could one day justify letting it
-        # gate trades. On the demo lab it would bill continuously for opinions
-        # nothing consumes. Gated on the live master switch - the same one the
-        # loss circuit breakers use - so it resumes by itself the moment live
-        # trading is enabled, with no config to remember. Nothing reads
-        # ai_reviews except the dashboard's display, so skipping it changes no
-        # trade and no readiness verdict.
-        if not self._settings.live_trading_enabled:
+        if ai_provider is None or not self._should_review():
             return
 
         try:
-            verdict = ai_provider.review_signal(signal, context)
+            verdict = ai_provider.review_signal(
+                signal, context, track_record=self._review_record.summary_for_prompt()
+            )
         except Exception:
             logger.exception("AI review failed for signal %s", signal_id)
             return

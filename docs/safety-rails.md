@@ -54,7 +54,7 @@ every `get_account_state()` (`MT5BrokerAdapter._daily_stats()`, counting
 backward from the most recent close while `profit < 0`) - never cached or
 estimated.
 
-## AI review is shadow-mode only - and live-only
+## AI review is shadow-mode only
 
 `ClaudeAIProvider` reviews a fired signal and logs a verdict to `ai_reviews`,
 but **the verdict never gates execution**: the trade proceeds or doesn't purely
@@ -63,14 +63,52 @@ Deliberate - build a track record before trusting it to block trades. If that
 ever changes it is a real architectural decision worth flagging loudly, not a
 quiet default.
 
-It also runs **only when `live_trading_enabled`** (`EngineLoop._review_with_ai`).
-Each review costs an Opus API call per fired signal, which only earns its keep
-where a track record against real-money outcomes could one day justify letting
-it gate trades; on the demo lab it billed continuously for opinions nothing
-consumes. Nothing reads `ai_reviews` except the dashboard's display column -
-not the evaluator, not the risk engine, not any strategy - so skipping it on
-demo changes no trade and no readiness verdict. It resumes by itself when live
-is enabled.
+Nothing reads `ai_reviews` to make a trading decision - not the evaluator, not
+the risk engine, not any strategy. The reviewer is powerless by construction, and
+that is what makes it measurable (below).
+
+### When it runs
+
+| | Reviews fired |
+|---|---|
+| Live account | always - every real-money signal is worth an opinion |
+| Demo lab, `AI_REVIEW_ENABLED=false` (default) | never |
+| Demo lab, `AI_REVIEW_ENABLED=true` | a random `AI_REVIEW_SAMPLE_PCT` of signals |
+
+This used to be gated on `live_trading_enabled` alone, which had a circularity
+worth naming: the track record that would justify trusting the reviewer could not
+begin accumulating until live trading was already on. The evidence was structurally
+guaranteed to arrive *after* the decision it was meant to inform. The lab produces
+real fills at real prices, so scoring against those lets going live start with a
+record rather than a blank page.
+
+Off by default because each review is an Opus call and the lab fires a lot of
+signals; `AI_REVIEW_SAMPLE_PCT` makes the cost a dial rather than a surprise.
+Sampling is **random**, not "first N per hour" - a time-based rule would
+over-sample quiet sessions, and session correlates with volatility and therefore
+with outcome, which would bias the very comparison the record exists to support.
+
+### Scoring it (`engine/review_scoring.py`)
+
+Migration `0014` added `trades.signal_id`, the key that joins a verdict to the
+trade's realized outcome. `review_scoring.compute()` reads it and splits closed
+trades into two arms - approved and rejected - reporting expectancy and a
+bootstrap 95% CI for each, using the same `engine/stats.py` primitives and the
+same exclusions as the readiness evaluator (voided trades and trades with no
+recorded risk are dropped).
+
+**The property that makes this a real measurement:** because the verdict never
+gates, *both arms are observed*. Trades Claude rejected are taken anyway and
+resolve, so there is no selection effect - which is close to a randomised trial
+and is something you essentially never get in trading. It exists only because the
+reviewer is powerless. The moment it is allowed to gate, the rejected arm vanishes
+and the record can no longer be extended, only spent. That is the strongest
+argument for leaving shadow mode alone until the record is thick.
+
+The record is fed back into the review prompt so Claude sees how its own verdicts
+have turned out - but it is computed in code and never self-assessed, and it
+**withholds the numbers entirely** until both arms clear 30 trades. A reviewer
+told "your approvals run +0.4R" on eleven trades learns to approve.
 
 ## RLS / dashboard security model
 
