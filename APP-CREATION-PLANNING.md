@@ -273,7 +273,7 @@ marked processed, Telegram-notified).
 user to complete sign-in themselves once, then confirm the buttons work.*
 
 **Phase 5 — AI decision layer** — built and verified live
-`ClaudeAIProvider` implemented (`claude-sonnet-5`, structured tool-use output
+`ClaudeAIProvider` implemented (`claude-opus-5`, structured tool-use output
 for a reliable `approved`/`confidence`/`rationale` verdict). Runs in shadow
 mode: every fired signal gets reviewed after the risk engine's own decision,
 logged to a new `ai_reviews` table (migration `0006_phase5_ai_reviews.sql`,

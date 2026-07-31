@@ -11,7 +11,7 @@ from engine.core.models import AIVerdict, Signal
 # point of shadow mode is to build a track record worth trusting later - a
 # cheaper model would make that record less meaningful. Reviews only run when a
 # signal actually fires (rare), so the cost is negligible.
-MODEL = "claude-opus-4-8"
+MODEL = "claude-opus-5"
 
 _VERDICT_TOOL = {
     "name": "submit_verdict",
@@ -56,7 +56,11 @@ class ClaudeAIProvider(AIProvider):
     ) -> AIVerdict:
         response = self._client.messages.create(
             model=MODEL,
-            max_tokens=512,
+            # The verdict itself is tiny (~150 tokens), but Opus 5 thinks by default
+            # and thinking is billed against max_tokens. At the old 512 the reasoning
+            # ate the whole budget and no tool_use block came back, i.e. every review
+            # failed. 8000 leaves room to reason and still caps a runaway response.
+            max_tokens=8000,
             tools=[_VERDICT_TOOL],
             tool_choice={"type": "tool", "name": "submit_verdict"},
             messages=[
