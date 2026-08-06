@@ -811,6 +811,70 @@ input:focus {
   white-space: nowrap;
 }
 
+/* ---------- Readiness meter: how close this strategy is to READY ---------- */
+
+.rmeter {
+  min-width: 170px;
+  margin-bottom: 9px;
+}
+
+.rmeter-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.rmeter-pct {
+  font-size: 15px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Green only once every gate is met - the same rule as .tprog-fill. Progress
+   through the process is not evidence of an edge, so it is not coloured as
+   success until it actually is one. */
+.rmeter-pct.is-ready {
+  color: var(--good);
+}
+
+.rmeter-sub {
+  font-size: 11.5px;
+  color: var(--ink-muted);
+}
+
+.rmeter-track {
+  position: relative;
+  height: 7px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.rmeter-fill {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+.rmeter-fill.is-ready {
+  background: var(--good);
+}
+
+/* One notch per gate boundary, so the bar reads as a five-step ladder rather
+   than a continuous countdown. Translucent black works on both the card and the
+   inset background the mobile card layout uses. */
+.rmeter-notch {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(0, 0, 0, 0.55);
+}
+
 .gates {
   list-style: none;
   margin: 0;

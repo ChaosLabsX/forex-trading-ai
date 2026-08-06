@@ -23,6 +23,8 @@ src/
     AccountFilter.tsx    scope selector - deliberately NO "All": summing demo play
                          money with real money is a figure you cannot trust
     StrategyLab.tsx      ranked verdicts, readiness counts, per-account toggles
+    Readiness.tsx        the "how close to READY" widgets: ReadinessMeter (one %),
+                         TradeProgress (trades toward 100), GateList (the five checks)
     StrategyReport.tsx   per-strategy deep view: metrics, equity curve, CI-vs-zero bar
     Engines.tsx          one card per account: status + its own controls
     PausedBanner.tsx     loud full-width alert + one-click resume, shown only while paused
@@ -46,6 +48,43 @@ label (LIVE/OFFLINE, ▲ LONG / ▼ SHORT) - never color alone. Tables use
 `tabular-nums` for numeric columns; below 700px each table collapses into
 stacked cards via CSS (`thead` hidden, `td::before` renders the column label
 from `data-label`), so nothing scrolls horizontally on phones.
+
+## The readiness meter (how the percentage is computed)
+
+The lab table's **Progress to READY** column leads with a single percentage per
+strategy, from `readinessScore()` in `lib/useStrategyLab.ts`. The same function
+feeds the "Closest to READY" stat tile, so the tile and the row cannot disagree.
+
+Each of the five gates in `readinessGates()` carries an equal 20% share:
+
+| Gate | Credit |
+|---|---|
+| 100+ closed trades | **partial** - `min(trades / 100, 1) x 20%` |
+| Expectancy > 0 | 20%, all-or-nothing |
+| 95% CI clears zero | 20%, all-or-nothing |
+| Profit factor >= 1.2 | 20%, all-or-nothing |
+| Max drawdown <= 15R | 20%, all-or-nothing |
+
+Only the sample gate pays partial credit, because it is the only one that is a
+matter of accumulation. A profit factor of 1.1 has **not** half-passed a 1.2 bar,
+and paying it out as 10% would read as "nearly there" for a strategy that may
+never arrive - the exact misread `verdictEta` already refuses to make by
+projecting an ETA to the sample gate only.
+
+Two properties that are deliberate:
+
+- **100% is reserved for every gate met.** Without that floor, 98 trades with all
+  four quality gates passed rounds to 100% while the badge beside it still reads
+  NOT READY - a number contradicting the verdict next to it. Anything short of
+  all five gates is capped at 99%.
+- **It can go DOWN.** It is a snapshot of gates cleared right now, not a loading
+  bar: more trades can break a gate that was passing, and the evaluator demoting
+  a decayed strategy is the system working. The meter's tooltip says so.
+
+The percentage is the coarse answer, `GateList` shows which checks are met, and
+the evaluator's own `verdict_reason` underneath is the precise binding
+constraint. The evaluator remains the sole authority on the verdict; this is
+presentation only.
 
 ## Auth model
 

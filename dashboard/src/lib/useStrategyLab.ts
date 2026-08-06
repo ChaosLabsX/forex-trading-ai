@@ -49,6 +49,56 @@ export function readinessGates(e: StrategyEvaluation | null): Gate[] {
   ];
 }
 
+export type ReadinessScore = {
+  /** 0-100. Exact and reproducible: every gate carries an equal share, and only
+   * the trade-count gate pays out partial credit. */
+  pct: number;
+  /** Gates currently met, out of all of them. */
+  met: number;
+  total: number;
+  trades: number;
+  tradesTarget: number;
+  /** All gates met - i.e. this evaluation satisfies the READY bar. */
+  complete: boolean;
+};
+
+/** How far along the READY ladder a strategy stands, as one number.
+ *
+ * Each of the five gates in `readinessGates` is worth an equal share (20%). The
+ * SAMPLE gate earns partial credit for partial progress, because accumulating
+ * trades is genuinely incremental. The four QUALITY gates pay nothing until met:
+ * a profit factor of 1.1 has not half-passed a 1.2 bar, and rendering it as
+ * "half a gate" would read as "nearly there" for a strategy that may never
+ * arrive. The whole point of this lab is that those four are decided on merit,
+ * not on waiting (see docs/strategy-lab.md).
+ *
+ * So this is a snapshot of gates cleared RIGHT NOW, not a loading bar. It moves
+ * DOWN when new trades break a gate that was passing - which is the evaluator
+ * working, and the UI says so rather than hiding it.
+ *
+ * 100% is reserved for "every gate met". Without that floor, 98 trades with all
+ * four quality gates passed rounds to 100% while the verdict still reads NOT
+ * READY - a number contradicting the badge next to it. */
+export function readinessScore(e: StrategyEvaluation | null): ReadinessScore {
+  const gates = readinessGates(e);
+  const trades = e?.trades_count ?? 0;
+  const share = 100 / gates.length;
+  const sampleFraction = Math.max(0, Math.min(1, trades / READINESS.minTradesReady));
+
+  let raw = sampleFraction * share;
+  for (const g of gates) if (g.key !== "sample" && g.met) raw += share;
+
+  const complete = gates.every((g) => g.met);
+  return {
+    pct: complete ? 100 : Math.min(99, Math.round(raw)),
+    met: gates.filter((g) => g.met).length,
+    total: gates.length,
+    trades,
+    tradesTarget: READINESS.minTradesReady,
+    complete,
+  };
+}
+
 export type VerdictEta = { perDay: number; days: number };
 
 const DAY_MS = 86_400_000;

@@ -4,7 +4,7 @@ import {
   fmtEta,
   latestEvaluation,
   rankStrategies,
-  readinessGates,
+  readinessScore,
   READINESS,
   verdictEta,
 } from "../lib/useStrategyLab";
@@ -75,13 +75,11 @@ export function StatTiles({ health, openTrades, strategies, evaluations, closedT
         ? "CI unavailable - too few trades"
         : "No evaluation yet";
 
-  // How far the leader is along the READY ladder: trades toward the 100 minimum,
-  // and how many of the quality gates are met. This is the honest "process"
-  // headline - the precise binding reason (verdict_reason) lives one glance down
-  // in the lab table's Progress column.
-  const leaderGates = readinessGates(leaderEval);
-  const leaderGatesMet = leaderGates.filter((g) => g.met).length;
-  const leaderTrades = leaderEval?.trades_count ?? 0;
+  // How far the leader is along the READY ladder, as the single number the lab
+  // table draws as a meter - same function, so the tile and the row can never
+  // disagree about how close anything is. The precise binding reason
+  // (verdict_reason) lives one glance down in the Progress column.
+  const leaderScore = readinessScore(leaderEval);
   const leaderEta =
     leader && labAccountKey && leaderEval
       ? verdictEta(closedTrades, leader.name, labAccountKey, leaderEval.trades_count)
@@ -131,7 +129,8 @@ export function StatTiles({ health, openTrades, strategies, evaluations, closedT
         </div>
         <div className="tile-sub">
           {leader
-            ? `${leaderTrades} / ${READINESS.minTradesReady} trades · ${leaderGatesMet}/${leaderGates.length} checks passed` +
+            ? `${leaderScore.pct}% there · ${leaderScore.met}/${leaderScore.total} checks · ` +
+              `${leaderScore.trades}/${READINESS.minTradesReady} trades` +
               (leaderEta ? ` · ${fmtEta(leaderEta)}` : "")
             : "No strategies registered"}
         </div>

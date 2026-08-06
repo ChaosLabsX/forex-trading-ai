@@ -9,7 +9,7 @@ import {
   verdictEta,
 } from "../lib/useStrategyLab";
 import { StrategyReport } from "./StrategyReport";
-import { GateList, TradeProgress } from "./Readiness";
+import { GateList, ReadinessMeter, TradeProgress } from "./Readiness";
 import { fmtStrategyName } from "../lib/format";
 
 const VERDICT_LABEL: Record<Readiness, string> = {
@@ -157,14 +157,17 @@ export function StrategyLab({ accounts, strategies, links, evaluations, closedTr
                     <td className="cell-num" data-label="Max DD">
                       {fmt(evaluation?.max_drawdown_r, 1, "R")}
                     </td>
-                    {/* The gate ladder makes the shape scannable; the evaluator's
-                        verdict_reason underneath is the precise binding constraint.
-                        verdict_reason is rewritten every snapshot (unlike
-                        strategies.readiness_reason, which only changes when the
-                        verdict does), so it always answers "what blocks it now". */}
+                    {/* Three levels of the same answer, coarse to precise: the meter
+                        is "how far along" at a glance, the gate ladder makes the
+                        shape scannable, and the evaluator's verdict_reason is the
+                        exact binding constraint. verdict_reason is rewritten every
+                        snapshot (unlike strategies.readiness_reason, which only
+                        changes when the verdict does), so it always answers "what
+                        blocks it now". */}
                     <td className="cell-reason cell-wide" data-label="Progress to READY">
                       {evaluation ? (
                         <>
+                          <ReadinessMeter evaluation={evaluation} />
                           <GateList evaluation={evaluation} />
                           {evaluation.verdict_reason && (
                             <div className="gate-reason">{evaluation.verdict_reason}</div>
