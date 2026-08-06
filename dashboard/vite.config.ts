@@ -3,10 +3,23 @@ import react from '@vitejs/plugin-react'
 import { VitePWA } from 'vite-plugin-pwa'
 
 // https://vite.dev/config/
-export default defineConfig({
+//
+// `mode` is 'production' for the deployed build (npm run build) and 'static'
+// for a build meant to be opened from a plain file server such as VS Code's
+// Live Server (npm run build:static). The only differences are the base path
+// and the service worker - see the two comments below.
+export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     VitePWA({
+      // A service worker precaches the app shell and is scoped to the folder it
+      // was served from. On a local static server that means an edit can appear
+      // not to land until the SW updates, which reads as "my change did
+      // nothing" - the least useful failure mode while developing. The PWA is a
+      // production feature; a local static build has no use for it. It also
+      // removes two of the four 404s a static server reports here
+      // (registerSW.js and manifest.webmanifest).
+      disable: mode === 'static',
       registerType: 'autoUpdate',
       includeAssets: ['favicon.ico', 'favicon-96x96.png', 'apple-touch-icon.png'],
       // The install name is the app's own identity ("Forex AI"). The DESCRIPTION
@@ -44,5 +57,13 @@ export default defineConfig({
   // a "/<repo>/" project-page prefix. If this ever reverts to the bare
   // chaoslabsx.github.io/<repo>/ URL, base must become "/<repo>/" again or every
   // asset 404s and the page renders blank.
-  base: "/",
-})
+  //
+  // A 'static' build uses "./" instead, because a plain file server hands the
+  // app out from a SUBFOLDER (.../dashboard/dist/index.html). Confirmed live
+  // with base "/": the page asks for /assets/index-*.js, /registerSW.js and
+  // /manifest.webmanifest at the SERVER ROOT, gets Live Server's HTML 404 page
+  // for each, and renders white - the CSS additionally failing a MIME check,
+  // because an error page is not a stylesheet. Relative paths resolve against
+  // wherever the page actually sits, which is the fix.
+  base: mode === 'static' ? './' : '/',
+}))

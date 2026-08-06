@@ -122,6 +122,14 @@ needs its own grants/RLS policies on every table the dashboard reads, even the
   the domain root. If it ever reverts to the bare `chaoslabsx.github.io/<repo>/`
   project-page URL, `base` must become `/<repo>/` or every asset 404s and the
   page renders blank.
+- **`dashboard/index.html` is Vite's source entry, not a servable page.** It
+  loads `/src/main.tsx`, which no browser can execute, so opening it from a
+  plain static server (VS Code Live Server, `file://`) renders white with a 404
+  for `/src/main.tsx`. Serving the *built* `dist/` from a subfolder on such a
+  server fails too, for a second reason: `base: '/'` sends every asset request
+  to the server root. `npm run build:static` builds with `base: './'` and the
+  service worker disabled for exactly this case; `npm run dev` remains the way
+  to actually develop. Details in [`../dashboard/README.md`](../dashboard/README.md).
 - `dashboard/public/CNAME` - one line naming the custom domain. Vite copies it
   verbatim into the build output, which is how GitHub Pages learns the domain on
   each deploy. A custom domain is globally unique to one repo across GitHub, so
