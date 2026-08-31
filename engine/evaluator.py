@@ -188,8 +188,22 @@ class ReadinessEvaluator:
             logger.exception("failed to store evaluation snapshot for %s", evaluation.strategy_name)
 
     def _apply_verdict(self, strategy: dict, evaluation: Evaluation, on_change) -> None:
+        # Write when the verdict OR its reason moved; announce only on the verdict.
+        #
+        # This used to return early whenever the verdict was unchanged, which
+        # froze `readiness_reason` at whatever it said the moment the verdict last
+        # flipped. The reason carries the live trade count, so the dashboard sat on
+        # "30/100 trades" while the evaluation snapshots had climbed to 43/100 -
+        # the one number a reader checks to see whether anything is progressing,
+        # stale precisely because nothing had changed *category*.
+        #
+        # on_change still fires only for a real promotion/demotion, so this does
+        # not add Telegram traffic. The reason string only moves when a trade
+        # closes, so it does not add meaningful write volume either.
         previous = strategy.get("readiness")
-        if previous == evaluation.verdict:
+        verdict_changed = previous != evaluation.verdict
+        reason_changed = strategy.get("readiness_reason") != evaluation.reason
+        if not verdict_changed and not reason_changed:
             return
         try:
             self._supabase.update(
@@ -204,6 +218,9 @@ class ReadinessEvaluator:
         except Exception:
             logger.exception("failed to update readiness for %s", evaluation.strategy_name)
             return
+
+        if not verdict_changed:
+            return  # reason refreshed in place; not a promotion or a demotion
 
         logger.info(
             "READINESS CHANGED: %s %s -> %s (%s)",

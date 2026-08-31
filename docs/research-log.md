@@ -12,6 +12,98 @@ commission), entries filled at the next bar's open, and judged by a bootstrap
 Six strategies, five mechanisms, ~37,000 simulated trades, 3-12.7 years of real
 history per instrument. Not one produced an edge that survives retail costs.
 
+## 2026-08-30 - The demo lab's first out-of-sample read on the backtests
+
+739 closed demo trades (2026-07-16 to 08-30) are now the first live check on the
+numbers below. They were produced by the real engine against the real broker, so
+they carry execution the backtest only models. Comparison, all in R:
+
+| Strategy | Backtest | n | Demo | n | Demo 95% CI | Delta |
+|---|---|---|---|---|---|---|
+| `ema_trend_v1` | ~0 | 61 | -0.286 | 10 | [-0.859, +0.376] | unjudgeable |
+| `london_breakout_v1` | -0.088 | 1,148 | **+0.137** | 43 | [-0.216, +0.499] | +0.225 |
+| `range_fade_v1` | -0.027 | 6,033 | -0.114 | 204 | [-0.272, +0.045] | -0.087 |
+| `range_fade_h4_v1` | -0.042 | 5,715 | -0.090 | 49 | [-0.393, +0.216] | -0.048 |
+| `donchian_breakout_v1` | -0.090 | 15,024 | **-0.376** | 261 | [-0.511, -0.236] | -0.286 |
+| `donchian_trending_v1` | -0.122 | 8,856 | **-0.324** | 172 | [-0.486, -0.155] | -0.202 |
+
+**The sign never flipped in the direction that matters.** Every strategy the
+backtest called negative came back negative, and the two channel-momentum
+strategies came back 2-4x worse than modelled, with demo CIs entirely below zero
+and drawdowns (101.6R and 58.2R) many times the 15R demote threshold.
+
+**Do not over-read the size of the deltas.** The demo window is **six weeks -
+one regime**, against backtests spanning 3-12.7 years. A momentum-hostile six
+weeks explains the donchian gap as well as any execution story does, and nothing
+here separates the two. What the window *can* support is the sign, which agrees
+with the backtest everywhere it has the sample to speak.
+
+### `london_breakout_v1` is the only positive, and it is thin
+
+Demo +0.137R over 43 trades, PF 1.285, max drawdown **3.45R** - by far the
+best-behaved equity curve in the lab, and the reason it is the only strategy the
+evaluator has ever rated `almost_ready`. Both halves are positive (+0.181R,
++0.095R). It is also, on the same data:
+
+- **outlier-carried** - dropping its single best trade gives +0.090R, dropping
+  the best three gives **-0.005R**. Three trades out of 43 is the whole result.
+- **median-negative** (-0.108R): most of its trades lose.
+- **contradicted by 27x more data.** The backtest said -0.088R over 1,148
+  trades. A true value of -0.088 is comfortably inside the demo CI
+  [-0.216, +0.499]. Nothing here is inconsistent with the backtest being right
+  and this being a lucky run.
+
+The honest reading is that it has not shown anything yet, which is exactly what
+`almost_ready` means and why the 100-trade bar exists. At its observed ~1.16
+trades/day it reaches 100 around **mid-October 2026**. There is no legitimate way
+to shorten that: the FX strategies already run the full 16-symbol `UNIVERSE`, so
+the data-rate lever used on `ema_trend_v1` has already been pulled.
+
+### The AI shadow reviewer shows no skill, and cannot reach a verdict from here
+
+`review_scoring.py` exists to answer one falsifiable question: does Claude's
+approval predict outcome? Joining all 189 `ai_reviews` through
+`signals` -> `trades.signal_id` to realised R:
+
+| Arm | n | Expectancy | 95% CI | Win rate |
+|---|---|---|---|---|
+| Approved | 38 | -0.164R | [-0.502, +0.200] | 29% |
+| Rejected | 17 | -0.197R | [-0.666, +0.350] | 18% |
+
+**Difference +0.033R, 95% CI [-0.600, +0.631].** No skill demonstrated. Both arms
+lose, and the gap between them is a rounding error inside an interval 1.2R wide.
+Approval rate is 69%; mean confidence is *higher* when rejecting (0.63) than when
+approving (0.58).
+
+The correct reading is not "the reviewer is useless" but **"this cannot be
+answered yet, and will not be soon."** The rejected arm has 17 trades against
+`MIN_ARM_FOR_ESTIMATE = 30`, so by the module's own standard no estimate should
+be quoted at all. Worse, the arithmetic of getting there is discouraging:
+
+- Only 55 of 189 reviews (29%) ever joined a closed trade with usable risk.
+- Reviews accrue at ~4/day, so scoreable *rejections* accrue at ~0.36/day. Thirty
+  rejections is ~5 more weeks; detecting an effect the size of a real edge
+  (~0.1R against a per-trade SD near 1R) needs several hundred per arm, which is
+  years.
+- **Retiring the two donchians on 2026-08-30 removes 33 of the 55 scored reviews'
+  source (60%)**, cutting that rate further. That is a real cost of the
+  retirement, recorded here rather than discovered later.
+
+So the reviewer is not a near-term route to anything. Raising
+`ai_review_sample_pct` (currently 10) would accelerate the record at the price of
+Opus calls per signal; leaving it alone means the experiment runs indefinitely
+without concluding. Either is defensible; pretending the current record says
+something is not.
+
+### Retired
+
+`donchian_breakout_v1` and `donchian_trending_v1` were marked
+`strategies.retired = true` on 2026-08-30. Both were negative in backtest before
+this, `donchian_trending_v1` was already recorded here as falsified 0-for-8 out
+of sample, and the demo run put both CIs entirely below zero over 261 and 172
+trades. They were 59% of all lab trades and were no longer buying information.
+Reversible in one field if that judgement is ever revisited.
+
 ## The strategies
 
 | Strategy | Mechanism | Trades | Net expectancy | Verdict |
