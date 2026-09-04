@@ -59,6 +59,61 @@ trades/day it reaches 100 around **mid-October 2026**. There is no legitimate wa
 to shorten that: the FX strategies already run the full 16-symbol `UNIVERSE`, so
 the data-rate lever used on `ema_trend_v1` has already been pulled.
 
+### Realised execution cost, measured without a cost model
+
+`risk_amount` is `|entry - stop| x value_per_lot x lots` - the loss a stop-out
+produces if it fills exactly at the stop and costs nothing. So a stopped-out trade
+should return exactly **-1.000R**, and whatever sits below that is spread +
+commission + slippage, in R, with no model in the way. Over 417 identified
+stop-outs (-1.6R <= R <= -0.85R, a band narrow enough to exclude gaps):
+
+**median +0.060R, mean +0.082R per trade.**
+
+| Strategy | n | Median realised cost |
+|---|---|---|
+| `london_breakout_v1` | 22 | **+0.100R** |
+| `range_fade_v1` | 111 | +0.098R |
+| `donchian_breakout_v1` | 141 | +0.066R |
+| `range_fade_h4_v1` | 30 | +0.046R |
+| `ema_trend_v1` | 6 | +0.030R |
+| `donchian_trending_v1` | 107 | +0.013R |
+
+On FX majors this runs 0.05-0.10R, which sits comfortably around the 0.066R the
+backtest models for `range_fade_v1` at H1. **On the non-FX symbols it does not:**
+
+| Symbol | Realised | Modelled | Ratio |
+|---|---|---|---|
+| IT40 | +0.002R | 0.099R | 43x |
+| XPTUSD | +0.012R | 0.315R | 27x |
+| XPDUSD | +0.021R | 0.357R | 17x |
+| XAGUSD | +0.014R | 0.186R | 13x |
+| MidDE50 | +0.016R | 0.148R | 9x |
+| BTCUSD | +0.004R | 0.023R | 6x |
+| XNGUSD | +0.019R | 0.070R | 4x |
+
+**Two readings, and this data cannot separate them.**
+
+1. *The model overstates cost on wide-stop instruments.* Consistent with the
+   hyperbola already recorded here (`cost = commission / (risk x value)` explodes
+   as the stop shrinks) and with `diagnose_costs.py` existing at all. If so, the
+   trending-asset verdicts were judged against an inflated toll.
+2. *The demo account does not charge live commission.* Then this measures spread
+   alone, live cost is higher by the commission term, and the FX agreement above
+   is a coincidence of two errors.
+
+**This does not reopen `donchian_trending_v1`.** Its realised cost was the lowest
+in the lab (+0.013R) and its demo expectancy was still -0.324R with a CI entirely
+below zero. Cheap execution did not save it; the signal is simply bad. The
+retirement stands on live results, not on modelled costs.
+
+**What it does change is how `london_breakout_v1` should be read.** It carries the
+*highest* realised cost of any strategy at +0.100R, and its +0.137R demo
+expectancy is already net of that - so its gross is ~+0.237R and costs eat 42% of
+it. Adding a live commission term of ~0.05R would take it to ~+0.087R; a term
+matching $7/lot round-turn on its typical stop would erase it. Which of those is
+true is not knowable from demo fills, and is the single most useful thing a small
+live account could measure.
+
 ### The AI shadow reviewer shows no skill, and cannot reach a verdict from here
 
 `review_scoring.py` exists to answer one falsifiable question: does Claude's
