@@ -133,7 +133,7 @@ arrives - the only test that distinguishes a working watchdog from a silent one.
 Use the script, not `Stop-ScheduledTask` on its own:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File C:\ForexAI\infraestart-live-engine.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\ForexAI\infra\restart-live-engine.ps1
 ```
 
 `Stop-ScheduledTask` ends the wrapper but **not** the `python.exe` it already
