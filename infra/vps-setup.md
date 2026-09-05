@@ -128,6 +128,31 @@ arrives - the only test that distinguishes a working watchdog from a silent one.
   Task Scheduler are wired correctly) - this is the actual test of "survives
   a reboot," not just reading the config.
 
+### Restarting the LIVE engine
+
+Use the script, not `Stop-ScheduledTask` on its own:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\ForexAI\infraestart-live-engine.ps1
+```
+
+`Stop-ScheduledTask` ends the wrapper but **not** the `python.exe` it already
+launched. That python is reparented and keeps running - still polling, still
+heartbeating, still holding its MT5 connection - so starting the task again
+leaves **two live engines on one account**. It happened on 2026-09-05 and was
+caught in the data rather than the console: `icmarkets-live` heartbeat gaps went
+from a clean ~61s to 20/41/20/40s.
+
+Killing the wrapper first does not help either, because by then its children have
+been reparented and there is nothing left to match on. The script snapshots the
+descendant tree *before* stopping the task.
+
+And do not reach for "kill every python running run_engine.py" - the demo lab
+runs the identical command line, so that also stops the lab accumulating the 100
+trades a readiness verdict needs. Parentage is the only reliable discriminator:
+the demo task executes `python.exe` directly (parent = Task Scheduler), the live
+engine is always a descendant of a `run-live-engine.ps1` powershell.
+
 ### 7. (Optional) Add the LIVE account's second engine
 
 Only when you want the live half running. It is safe to do now: the live engine
