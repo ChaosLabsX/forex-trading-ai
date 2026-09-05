@@ -44,6 +44,14 @@ export type Trade = {
   /** Non-null means excluded from every statistic - set only by a manual
    * repair (e.g. migration 0013), never by the engine. */
   void_reason: string | null;
+  /** Market P&L before costs. NULL for anything closed before migration 0015 -
+   * treat that as "fees unknown" and fall back to realized_pnl rather than
+   * presenting a net figure as if it were gross. */
+  gross_profit: number | null;
+  /** Broker's own sign convention: commission is normally negative, swap can be
+   * either. realized_pnl = gross_profit + commission + swap. */
+  commission: number | null;
+  swap: number | null;
 };
 
 export type Heartbeat = {

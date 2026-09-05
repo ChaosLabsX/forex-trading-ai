@@ -878,6 +878,16 @@ class EngineLoop:
                     {
                         "status": "CLOSED",
                         "realized_pnl": net,
+                        # The same split Telegram already reports (win before
+                        # fees, loss all-in). Stored so the dashboard can make
+                        # that distinction too - previously the parts were
+                        # computed here and thrown away, leaving one number that
+                        # could not separate a thin win from its costs. Purely
+                        # additive: realized_pnl stays the source of truth for
+                        # every statistic. See migration 0015.
+                        "gross_profit": breakdown.gross_profit if breakdown else None,
+                        "commission": breakdown.commission if breakdown else None,
+                        "swap": breakdown.swap if breakdown else None,
                         "closed_at": datetime.now(timezone.utc).isoformat(),
                     },
                 )

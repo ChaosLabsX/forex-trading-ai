@@ -15,11 +15,15 @@ src/
     useDashboardData.ts   ONE polling loop (15s); derives per-account health once,
                           so no component re-invents the staleness/paused rule
     useStrategyLab.ts     registries + latest evaluation per (strategy, account)
+    usePnlReport.ts       every closed trade for ONE account (paged, 60s) + the
+                          period maths and the gross/net headline rule
     format.ts             date/money/relative-time formatting helpers
   components/
     Login.tsx            the full-page gate - the only thing a signed-out visitor sees
     Dashboard.tsx        signed-in layout: topbar, paused banner, stat tiles, sections, account settings
     StatTiles.tsx        KPI row: engines, open trades, total P&L, win rate
+    PnlReport.tsx        live-account money panel: one period at a time, with
+                         month/year arrows, a custom range and All
     AccountFilter.tsx    scope selector - deliberately NO "All": summing demo play
                          money with real money is a figure you cannot trust
     StrategyLab.tsx      ranked verdicts, readiness counts, per-account toggles
@@ -85,6 +89,64 @@ The percentage is the coarse answer, `GateList` shows which checks are met, and
 the evaluator's own `verdict_reason` underneath is the precise binding
 constraint. The evaluator remains the sole authority on the verdict; this is
 presentation only.
+
+## The live view
+
+The account filter defaults to the **live** account whenever one is registered
+and `enabled` - `Dashboard.tsx` derives `activeKey` from the accounts list, and
+the user's click is held in component state that is deliberately **never**
+persisted. Every reload therefore lands back on live, which is the intent: the
+account with real money on it is the one you should be looking at by default,
+and a stale "I was browsing the demo lab yesterday" preference is exactly the
+wrong thing to restore.
+
+On live the page also **collapses to the money**: the P&L panel, the stat tiles,
+and nothing else. The lab table, engines, trade history and signals feed are
+research about the demo account, and they are noise in front of someone checking
+on real money - so they sit behind one "Show the full dashboard" button, which
+resets on reload like the account choice does.
+
+Two things stay visible in the collapsed view on purpose:
+
+- **`PausedBanner`** - it renders nothing at all unless an engine really is
+  paused, and when one is, it carries the only resume button in the app. Hiding
+  the control that un-breaks trading is not a thing a "focused" view should do.
+- **`AccountFilter`** - it is the way back to the demo lab, so it can never be
+  one of the things the live view hides.
+
+## How the P&L panel reports money
+
+`PnlReport.tsx` follows the **same convention as every Telegram trade alert**
+(`trade_closed()` in `engine/reporting.py`): a winning period is reported
+**before fees**, a losing one **all-in**. Whether it won or lost is decided by
+the **net**, never the gross - so a period whose gross is positive but whose
+commission ate it reads as a loss, which is the case the convention exists for.
+
+Three properties that are deliberate:
+
+- **Gross, fees and net are always all three on screen**, directly under the
+  headline. A big number showing gross while hiding net would be a money figure
+  that flatters; the split row means the amount that actually moved the balance
+  is never more than a glance away.
+- **A missing fee split is never filled in.** Trades closed before migration
+  `0015` carry no `gross_profit`, and PostgREST omits the column entirely until
+  that migration is applied - so the field arrives `undefined`, not `null`.
+  `summarize()` tests `?? null` for exactly this, falls back to the net
+  headline, and says how many trades are unaccounted for. A partial gross sum
+  would silently understate.
+- **A closed trade with no `realized_pnl` is not a zero.** MT5 sometimes never
+  returns a result; those are excluded from the sums and counted out loud,
+  rather than entering the total as a fake breakeven.
+
+The panel reads **every** closed trade for the account via its own paged query,
+not the 50-row recent slice `useDashboardData` fetches for the history table -
+an all-time total built on a capped list would silently stop growing. Voided
+trades (migration `0013`) are excluded, matching the lab. Open positions are
+excluded too, and the panel says so: these are realized results only.
+
+Month and year boundaries are computed in **local** time, because the user reads
+"September" as their own September. The arrows clamp to the range that actually
+contains trades, and on an account with no history yet they both rest.
 
 ## Auth model
 
