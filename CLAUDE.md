@@ -23,11 +23,22 @@ refusal is the product.
   5 mechanisms and up to 12.7 years of history. See
   [`docs/research-log.md`](docs/research-log.md) - **read it before proposing a
   strategy.**
-- **Live trading is off behind four independent guards.** The live account is
-  registered, funded with $0, and cannot place an order. See
+- **LIVE TRADING IS ON, for exactly one strategy.** Since 2026-09-05 the live
+  account (`icmarkets-live`, IC Markets, MT5 #8050468) is funded with **$200**
+  and all four guards are deliberately open for **`london_breakout_v1` only**:
+  `LIVE_TRADING_ENABLED=true` in `.env.live`, `accounts.enabled=true`,
+  `strategy_accounts.enabled=true`, and `live_override=true` standing in for the
+  READY verdict it does not have. Risk is `risk_pct=0.75` (~$1.50 a trade). Every
+  other strategy is `enabled=false` on live. See
   [`docs/going-live.md`](docs/going-live.md).
-- **The user's plan:** wait for a `🏆 READY` Telegram alert, then fund the live
-  account and enable that one strategy. Nothing else is pending.
+- **That is a deliberate bet on a strategy that has not proven an edge**, taken
+  with the user's eyes open: `london_breakout_v1` is `almost_ready` at +0.126R
+  over 50 demo trades, which is one tenth of its own 1.24R spread. Proving that
+  edge is real would take ~369 trades (~18 months). The $200 is sized as tuition,
+  not as an investment - do not let anything in here imply the edge is settled.
+- **The demo lab keeps running regardless**, and remains the only thing that
+  produces a READY verdict. `donchian_breakout_v1` and `donchian_trending_v1`
+  are retired (both CIs entirely below zero).
 
 ## Hard constraint - read before proposing anything MT5-related
 

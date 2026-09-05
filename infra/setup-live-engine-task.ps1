@@ -11,10 +11,16 @@ Two engines, two terminals, two accounts, two log files, one repo. They share
 nothing but the code - see infra/run-live-engine.ps1 for how the config is
 overridden per process.
 
-This does NOT enable live trading. The live engine starts, connects, heartbeats
-and reports, and places nothing: four independent guards block execution until
-risk-based position sizing exists (see run-live-engine.ps1's header and
-docs/safety-rails.md).
+Registering the task does not by itself enable live trading - four independent
+guards do that, and they are described in run-live-engine.ps1's header and
+docs/going-live.md.
+
+Do NOT read that as "this cannot trade". As of 2026-09-05 all four guards are
+open for london_breakout_v1 on the funded live account, so an engine started by
+this task WILL place real orders. An earlier version of this header claimed
+execution was blocked "until risk-based position sizing exists"; sizing exists,
+and the claim outlived the fact it was based on. Check the guards, never a
+comment.
 #>
 
 param(

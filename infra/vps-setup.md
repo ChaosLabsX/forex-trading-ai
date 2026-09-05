@@ -155,11 +155,16 @@ engine is always a descendant of a `run-live-engine.ps1` powershell.
 
 ### 7. (Optional) Add the LIVE account's second engine
 
-Only when you want the live half running. It is safe to do now: the live engine
-connects, heartbeats and reports, and **places no orders** - four independent
-guards block execution until risk-based position sizing exists (see
-`infra/run-live-engine.ps1`'s header and `docs/safety-rails.md`). Running it
-early is how you prove the plumbing works before any money is at stake.
+**This section is written for the setup stage, when the live account held $0 and
+every guard was shut.** That is no longer the state: since 2026-09-05 the account
+is funded with $200 and `london_breakout_v1` trades it for real. Whether an
+engine places orders depends on the four guards in
+[`docs/going-live.md`](../docs/going-live.md) - never on a sentence in a runbook.
+(An earlier version of this paragraph said execution was blocked "until
+risk-based position sizing exists". Sizing shipped; the sentence stayed. That is
+the failure mode to watch for in here.)
+
+The steps below are still the right way to stand the second engine up.
 
 The model is: **two terminals, two engines, two accounts, two log files, one
 repo.** MT5's Python bridge attaches to one terminal per process, so the live

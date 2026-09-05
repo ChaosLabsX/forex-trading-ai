@@ -80,7 +80,7 @@ function AccountPanel({
       {!evaluation || evaluation.trades_count === 0 ? (
         <div className="chart-empty">
           No evaluated trades on this account yet
-          {isLive ? " — live trading is blocked until position sizing exists." : "."}
+          {isLive ? " — it has not fired on live yet." : "."}
         </div>
       ) : (
         <>

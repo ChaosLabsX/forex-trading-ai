@@ -6,24 +6,35 @@ One repo, two engines: this sets environment variables, which OVERRIDE .env
 engine keeps using .env as-is, and this process differs only where it must -
 account, terminal, log file, digest.
 
-SAFETY - four independent guards keep this process from placing a real order.
-All four must be deliberately undone; none is a config typo away:
+*** THIS PROCESS PLACES REAL ORDERS. *** As of 2026-09-05 the account is funded
+with $200 and all four guards are open for london_breakout_v1. This header used
+to say the opposite, and said it for weeks after it stopped being true - so
+treat the list below as a description of the MECHANISM, and go read the actual
+state before you believe anything about it.
 
-  1. LIVE_TRADING_ENABLED is off (Settings default). engine/gating.py blocks
-     every strategy account-wide on a live account while it is off. This is THE
-     master switch, and it is deliberately not derived from any feature being
-     unimplemented - see docs/going-live.md.
-  2. accounts.enabled = false for icmarkets-live (migration 0010).
-  3. strategy_accounts.enabled = false for every strategy on live.
-  4. Live requires readiness = 'ready', which no strategy has yet.
+SAFETY - four independent guards decide whether a real order can be placed. All
+four must line up; none is a config typo away. Current state in brackets:
+
+  1. LIVE_TRADING_ENABLED - the master switch, from .env.live. engine/gating.py
+     blocks every strategy account-wide on a live account while it is off. It is
+     deliberately not derived from any feature being unimplemented, precisely so
+     it cannot evaporate when that feature ships - see docs/going-live.md.
+     [ON]
+  2. accounts.enabled for icmarkets-live (migration 0010).  [true]
+  3. strategy_accounts.enabled, per strategy on this account.
+     [true for london_breakout_v1 ONLY; false for the other five]
+  4. Live requires readiness = 'ready', or live_override on that pair.
+     [london_breakout_v1 is almost_ready, running on live_override = true]
+
+To disarm the whole account in one move, set LIVE_TRADING_ENABLED=false in
+.env.live and restart via infra/restart-live-engine.ps1. Guard 1 is account-wide
+and needs no database change.
 
 NOTE: TEST_MODE=false below is NOT a guard - it selects real risk-based sizing
 over the demo's fixed micro lot, which is the correct setting for a live
-account. (TEST_MODE=true here would be the dangerous one: it would size real
-0.01-lot orders.) Safety comes from guard 1, not from this.
-
-Running this today is therefore safe and useful: it proves the live plumbing
-(terminal attach, heartbeat, dashboard, Telegram) works, while placing nothing.
+account. (TEST_MODE=true here would be the dangerous one: it would place real
+orders at the broker minimum, ignoring your risk budget entirely.) Safety comes
+from guard 1, not from this.
 #>
 
 param(

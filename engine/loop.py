@@ -298,6 +298,29 @@ class EngineLoop:
             self._backoff_index += 1
             time.sleep(wait)
 
+    def _live_trading_detail(self) -> str | None:
+        """Guard 1's state, published so the dashboard can stop guessing.
+
+        LIVE_TRADING_ENABLED is an environment variable on the VPS, read once at
+        process start. Nothing in the database reflects it, so the dashboard had
+        no way to know whether the account in front of you can actually place a
+        real order - and said so with a hardcoded sentence that went stale and
+        started claiming the opposite of the truth.
+
+        Only live accounts report it. On a demo account the flag has no meaning
+        (gating.py checks it only for `account.is_live`), and emitting it there
+        would invite a reader to think the lab was armed for real money.
+
+        The exact strings are a contract with the dashboard - see
+        LIVE_TRADING_ON in dashboard/src/components/Engines.tsx. A live engine
+        that predates this reports NULL, which the dashboard renders as
+        "unknown" rather than assuming either state.
+        """
+        account = self._account()
+        if account is None or not account.is_live:
+            return None
+        return "live_trading=on" if self._settings.live_trading_enabled else "live_trading=off"
+
     def _send_heartbeat(self) -> None:
         # status carries the pause state so the dashboard can show PAUSED vs
         # LIVE - the engine keeps heartbeating and monitoring while paused, it
@@ -310,7 +333,7 @@ class EngineLoop:
                     {
                         "status": status,
                         "broker_connected": self._connected,
-                        "detail": None,
+                        "detail": self._live_trading_detail(),
                         "account_key": self._account_key,
                     }
                 ],
