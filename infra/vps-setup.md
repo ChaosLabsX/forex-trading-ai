@@ -143,15 +143,36 @@ leaves **two live engines on one account**. It happened on 2026-09-05 and was
 caught in the data rather than the console: `icmarkets-live` heartbeat gaps went
 from a clean ~61s to 20/41/20/40s.
 
-Killing the wrapper first does not help either, because by then its children have
-been reparented and there is nothing left to match on. The script snapshots the
-descendant tree *before* stopping the task.
-
 And do not reach for "kill every python running run_engine.py" - the demo lab
 runs the identical command line, so that also stops the lab accumulating the 100
-trades a readiness verdict needs. Parentage is the only reliable discriminator:
-the demo task executes `python.exe` directly (parent = Task Scheduler), the live
-engine is always a descendant of a `run-live-engine.ps1` powershell.
+trades a readiness verdict needs.
+
+**How the script knows which one is the live engine.** It reads
+`logs\engine-icmarkets-live.pid`, which `scripts/run_engine.py` writes at startup
+and removes on a clean exit. Each account writes its own, so the two can never be
+confused, and reading a file is instant.
+
+Earlier versions worked this out by walking the process tree with
+`Get-CimInstance Win32_Process`. That was correct and unusable: on this VPS the
+query does not return in any reasonable time, and the script hung on its *first
+statement*, before stopping anything - twice. There is no WMI left in it now,
+only `Get-Process` and file reads.
+
+The pid file also supplies the success signal. The script deletes it, starts the
+task, and waits for a **new** pid to appear; that is proof the engine came back
+rather than an inference. (It used to check the log's last `attached:` line -
+the last one *ever* written - so a restart that never happened still printed a
+success line from the run before it.)
+
+**If the pid file is missing** - an engine started before this existed, or one
+that was hard-killed - the script tries one safe deduction: if the *other*
+engines have named themselves by pid file and exactly one venv python is left
+over, that one is ours. Failing that it prints the candidates and stops, rather
+than risk stopping the demo lab. Name it explicitly to proceed:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File C:\ForexAI\infra\restart-live-engine.ps1 -EnginePid 1234
+```
 
 ### 7. (Optional) Add the LIVE account's second engine
 

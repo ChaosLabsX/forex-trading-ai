@@ -11,9 +11,12 @@ desktop session, which a Session-0 service doesn't have.
 
 from __future__ import annotations
 
+import atexit
 import logging
 import logging.handlers
+import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -22,6 +25,40 @@ from engine.config import Settings
 from engine.loop import EngineLoop
 from engine.registry import build_engine
 from engine.supabase_client import SupabaseClient
+
+
+def _publish_pid(log_dir: Path, account_key: str) -> None:
+    """Write this process's PID next to its log, and remove it on a clean exit.
+
+    Restarting the live engine used to mean identifying it by walking the
+    Windows process tree over WMI - the only way to tell it from the demo lab,
+    which runs the identical command line. That worked, but `Win32_Process` can
+    hang for minutes on a loaded box, and a restart script that hangs before it
+    stops anything is a restart script that does not restart anything. It
+    happened twice on 2026-09-05.
+
+    A process that knows its own PID has no reason to make anything guess. The
+    file also gives the restart script a clean success signal: it deletes this
+    file, starts the task, and waits for a NEW pid to appear. That is proof the
+    engine came back, not an inference from a log line that may predate it.
+
+    The timestamp is there to survive PID recycling - Windows reuses PIDs, and a
+    stale file must never point the killer at an unrelated process. A reader
+    checks that the PID is alive, is a python, and started around this time.
+
+    Best-effort by design: a failure to write it must never stop the engine, and
+    a hard kill leaves the file stale, which readers already have to handle.
+    """
+    try:
+        pid_file = log_dir / f"engine-{account_key}.pid"
+        pid_file.write_text(
+            f"{os.getpid()}\n{datetime.now(timezone.utc).isoformat()}\n",
+            encoding="utf-8",
+        )
+        atexit.register(lambda: pid_file.unlink(missing_ok=True))
+        logging.getLogger("engine").info("pid %s published to %s", os.getpid(), pid_file)
+    except Exception:
+        logging.getLogger("engine").warning("could not write pid file", exc_info=True)
 
 
 def main() -> None:
@@ -71,6 +108,8 @@ def main() -> None:
             logging.StreamHandler(),
         ],
     )
+    _publish_pid(log_dir, settings.account_key)
+
     engine = build_engine(settings=settings)
     supabase = SupabaseClient(settings)
 

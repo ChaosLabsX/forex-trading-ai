@@ -20,3 +20,8 @@ dashboard/dist/
 
 # Design source files (large binaries) - not needed to build/run the app
 Illustrator/
+
+# Runtime pid files written by scripts/run_engine.py (logs/engine-<account>.pid).
+# Machine-local and must never be committed: a pulled pid file would point the
+# restart script at a PID from a different machine.
+*.pid
