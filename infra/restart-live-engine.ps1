@@ -30,20 +30,25 @@ of a powershell running run-live-engine.ps1. That is the only reliable
 discriminator, and it is why this script is fussy about process trees instead of
 names.
 
-WAITING, NOT SLEEPING. The first version of this script spent 30 seconds in
-unconditional Start-Sleep and then "verified" the restart by printing the last
-'attached:' line in the log - which is the last one EVER written, so a restart
-that never happened still printed a success line from the previous run. Every
-wait here is now a poll against a real condition with a deadline, and the log is
-read only from the point the restart began, so the evidence belongs to THIS run.
+IT MUST NOT LOOK HUNG. The first version spent 30 seconds in unconditional
+Start-Sleep and printed nothing while it did - and on 2026-09-05 it was
+interrupted partway, which left the live engine untouched while the demo one
+restarted normally. Every step now prints as it happens with an elapsed clock,
+every wait is a poll against a real condition with a deadline, and the process
+queries are WMI-filtered rather than enumerating all ~300 processes twice a
+second.
 
-THE SILENT FAILURE THIS GUARDS AGAINST. Task Scheduler can still consider the
-task 'Running' for a moment after its process is gone. `Start-ScheduledTask` on
-a task that is still Running is silently ignored when the task's
-MultipleInstances policy is IgnoreNew - the command succeeds, nothing starts,
-and you are left with a demo engine that restarted and a live engine that did
-not. So the task is polled down to a non-Running state before it is started, and
-the start itself is verified rather than assumed.
+IT MUST NOT LIE ABOUT SUCCEEDING. The first version "verified" by printing the
+last 'attached:' line in the log - the last one EVER written - so a restart that
+never happened still printed a success line from the previous run. The log is
+now read only from the point this restart began.
+
+THE SILENT FAILURE THIS GUARDS AGAINST. Task Scheduler can still consider a task
+'Running' for a moment after its process is gone, and `Start-ScheduledTask` on a
+Running task is silently ignored under MultipleInstances=IgnoreNew - the command
+succeeds, nothing starts, and you get a demo engine that restarted and a live
+engine that did not. The task is polled down to a non-Running state first, and
+the start is verified rather than assumed.
 
 Usage (elevated PowerShell on the VPS):
     powershell -NoProfile -ExecutionPolicy Bypass -File C:\ForexAI\infra\restart-live-engine.ps1
@@ -52,36 +57,48 @@ Usage (elevated PowerShell on the VPS):
 param(
     [string]$TaskName = "ForexAI-Engine-Live",
     [string]$RepoDir  = "C:\ForexAI",
-    # Deadlines, not durations: the script returns as soon as the condition is
-    # met, and only waits this long when something is actually wrong.
+    # Deadlines, not durations: each wait returns the moment its condition is
+    # met, and only runs this long when something is actually wrong.
     [int]$StopTimeout  = 20,
     [int]$StartTimeout = 45
 )
 
 $ErrorActionPreference = "Stop"
 $log = Join-Path $RepoDir "logs\engine-icmarkets-live.log"
+$clock = [Diagnostics.Stopwatch]::StartNew()
+
+function Step { param([string]$Text) Write-Host ("[{0,5:0.0}s] {1}" -f $clock.Elapsed.TotalSeconds, $Text) }
 
 function Wait-Until {
-    param([scriptblock]$Condition, [int]$TimeoutSeconds, [string]$What)
+    param([scriptblock]$Condition, [int]$TimeoutSeconds, [string]$What, [int]$PollMs = 500)
     $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
     while ((Get-Date) -lt $deadline) {
         if (& $Condition) { return $true }
-        Start-Sleep -Milliseconds 500
+        Start-Sleep -Milliseconds $PollMs
     }
-    Write-Host "  timed out after ${TimeoutSeconds}s waiting for: $What" -ForegroundColor Yellow
+    Step "  timed out after ${TimeoutSeconds}s waiting for: $What"
     return $false
 }
 
+function Get-EngineProcs {
+    # ONE WMI-filtered query. Enumerating every process costs ~3x this and was
+    # being run twice a second by the polling loops.
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe' OR Name='python.exe'"
+}
+
 function Get-LiveTree {
-    # The wrapper powershell plus every descendant, resolved breadth-first.
-    $roots = @((Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" |
-                Where-Object { $_.CommandLine -like '*run-live-engine.ps1*' }).ProcessId)
+    # The run-live-engine.ps1 wrapper plus every descendant of it. The chain is
+    # powershell -> python, so restricting the search to engine-shaped processes
+    # loses nothing and keeps this cheap enough to poll.
+    param($Procs = (Get-EngineProcs))
+    $roots = @(($Procs | Where-Object {
+        $_.Name -eq 'powershell.exe' -and $_.CommandLine -like '*run-live-engine.ps1*'
+    }).ProcessId)
     if (-not $roots) { return @() }
-    $all  = Get-CimInstance Win32_Process
     $tree = @($roots | Where-Object { $_ })
     $i = 0
     while ($i -lt $tree.Count) {
-        $tree += @(($all | Where-Object { $_.ParentProcessId -eq $tree[$i] }).ProcessId)
+        $tree += @(($Procs | Where-Object { $_.ParentProcessId -eq $tree[$i] }).ProcessId)
         $i++
     }
     return @($tree | Sort-Object -Unique | Where-Object { $_ })
@@ -90,25 +107,29 @@ function Get-LiveTree {
 function Get-LivePython {
     # A live-engine python: descended from the wrapper, or orphaned from one.
     # The demo engine never matches - its parent is Task Scheduler, always alive.
-    $tree = Get-LiveTree
-    Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
-        Where-Object { $_.CommandLine -like '*run_engine*' } |
-        Where-Object {
-            ($tree -contains $_.ProcessId) -or
-            (-not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue))
-        }
+    $procs = Get-EngineProcs
+    $tree = Get-LiveTree -Procs $procs
+    $procs | Where-Object {
+        $_.Name -eq 'python.exe' -and $_.CommandLine -like '*run_engine*'
+    } | Where-Object {
+        ($tree -contains $_.ProcessId) -or
+        (-not (Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue))
+    }
 }
 
 # 1. Snapshot the tree BEFORE anything is stopped. Once the wrapper dies its
 #    children are reparented and this mapping is gone.
+Step "Looking for the live engine..."
 $tree = Get-LiveTree
+$doomed = @((Get-LivePython).ProcessId)
 if ($tree.Count) {
-    Write-Host "Live engine process tree: $($tree -join ', ')"
+    Step "Live engine process tree: $($tree -join ', ')"
 } else {
-    Write-Host "No running live-engine wrapper found (already stopped, or started another way)."
+    Step "No running live-engine wrapper found (already stopped, or started another way)."
 }
 
 # 2. Stop the task, then clean up anything the stop left running.
+Step "Stopping $TaskName..."
 Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 
 foreach ($id in $tree) {
@@ -117,7 +138,8 @@ foreach ($id in $tree) {
     $p = Get-CimInstance Win32_Process -Filter "ProcessId=$id" -ErrorAction SilentlyContinue
     if ($p -and ($p.Name -eq 'python.exe' -or $p.CommandLine -like '*run-live-engine.ps1*')) {
         Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
-        Write-Host "  stopped $id ($($p.Name))"
+        Step "  stopped $id ($($p.Name))"
+        $doomed += $id
     }
 }
 
@@ -126,20 +148,31 @@ foreach ($id in $tree) {
 #    so this is a hard gate, not a courtesy check.
 Get-LivePython | ForEach-Object {
     Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-    Write-Host "  stopped orphan $($_.ProcessId)"
+    Step "  stopped orphan $($_.ProcessId)"
+    $doomed += $_.ProcessId
 }
 
-$clear = Wait-Until { -not (Get-LivePython) } $StopTimeout "the old live engine to exit"
-if (-not $clear) {
-    Write-Host ""
-    Write-Host "ABORTED: a live-engine python is still running, so starting the task now" -ForegroundColor Red
-    Write-Host "would put TWO engines on the live account. Survivors:" -ForegroundColor Red
-    Get-LivePython | Format-Table ProcessId, ParentProcessId, CreationDate -AutoSize
-    exit 1
+$doomed = @($doomed | Sort-Object -Unique | Where-Object { $_ })
+if ($doomed.Count) {
+    Step "Waiting for PID(s) $($doomed -join ', ') to exit..."
+    # Poll the specific PIDs rather than re-scanning: a targeted liveness check
+    # is several times cheaper, which matters at 2 polls a second.
+    $gone = Wait-Until {
+        -not ($doomed | Where-Object { Get-Process -Id $_ -ErrorAction SilentlyContinue })
+    } $StopTimeout "the old live engine to exit"
+
+    if (-not $gone) {
+        Write-Host ""
+        Write-Host "ABORTED: a live-engine process is still running, so starting the task now" -ForegroundColor Red
+        Write-Host "would put TWO engines on the live account. Survivors:" -ForegroundColor Red
+        Get-LivePython | Format-Table ProcessId, ParentProcessId, CreationDate -AutoSize
+        exit 1
+    }
 }
 
 # Task Scheduler can lag behind its own process. Starting while it still reads
 # Running is silently dropped under MultipleInstances=IgnoreNew.
+Step "Waiting for Task Scheduler to release '$TaskName'..."
 $null = Wait-Until {
     (Get-ScheduledTask -TaskName $TaskName).State -ne 'Running'
 } $StopTimeout "Task Scheduler to release '$TaskName'"
@@ -149,18 +182,19 @@ $null = Wait-Until {
 $logLinesBefore = 0
 if (Test-Path $log) { $logLinesBefore = @(Get-Content $log).Count }
 
+Step "Starting $TaskName..."
 Start-ScheduledTask -TaskName $TaskName
-Write-Host "Started $TaskName - waiting for it to attach..."
 
-$up = Wait-Until { @(Get-LivePython).Count -ge 1 } $StartTimeout "the engine process to appear"
+$up = Wait-Until { @(Get-LivePython).Count -ge 1 } $StartTimeout "the engine process to appear" 1000
 if (-not $up) {
     Write-Host ""
     Write-Host "FAILED: $TaskName did not produce an engine process." -ForegroundColor Red
-    Write-Host "Task state: $((Get-ScheduledTask -TaskName $TaskName).State)"
+    Write-Host "Task state:      $((Get-ScheduledTask -TaskName $TaskName).State)"
     Write-Host "Last run result: $((Get-ScheduledTaskInfo -TaskName $TaskName).LastTaskResult)"
     Write-Host "Check the tail of $log, then try: Start-ScheduledTask -TaskName $TaskName"
     exit 1
 }
+Step "Engine process is up - waiting for it to attach to the broker..."
 
 # 5. Prove it came back on the RIGHT account. A wrong-account attach is worse
 #    than a failed start, so this waits for the line rather than assuming it.
@@ -170,7 +204,7 @@ $null = Wait-Until {
     $new = @(Get-Content $log) | Select-Object -Skip $logLinesBefore
     $script:attached = $new | Select-String -Pattern 'attached:' | Select-Object -Last 1
     return [bool]$script:attached
-} $StartTimeout "the 'attached:' line for this restart"
+} $StartTimeout "the 'attached:' line for this restart" 1000
 
 Write-Host ""
 if ($attached) {
@@ -181,7 +215,7 @@ if ($attached) {
 
 Write-Host ""
 Write-Host "Engine processes now running (expect ONE live tree plus the demo pair):"
-Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='powershell.exe'" |
+Get-EngineProcs |
     Where-Object { $_.CommandLine -match 'run_engine|run-live-engine' } |
     ForEach-Object {
         $q = Get-Process -Id $_.ParentProcessId -ErrorAction SilentlyContinue
@@ -190,3 +224,5 @@ Get-CimInstance Win32_Process -Filter "Name='python.exe' OR Name='powershell.exe
             ParentAlive = [bool]$q; Started = $_.CreationDate; Proc = $_.Name
         }
     } | Sort-Object Started | Format-Table -AutoSize
+
+Step "Done."
