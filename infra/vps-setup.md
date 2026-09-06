@@ -128,6 +128,32 @@ arrives - the only test that distinguishes a working watchdog from a silent one.
   Task Scheduler are wired correctly) - this is the actual test of "survives
   a reboot," not just reading the config.
 
+### Telling the two console windows apart
+
+Both engines are now started identically - Task Scheduler executing
+`.venv\Scripts\python.exe scripts\run_engine.py` - which is exactly what makes
+restarting them one identical command each. The cost is that their consoles
+became indistinguishable, and `MainWindowTitle` is empty under Windows
+Terminal's ConPTY, so there is nothing to match on from outside.
+
+So each engine names its own window at startup:
+
+| Window title | Which engine |
+|---|---|
+| `ForexAI  -  DEMO LAB  (icmarkets-demo)` | the lab |
+| `*** ForexAI  -  LIVE / REAL MONEY ARMED  (icmarkets-live) ***` | real money, guard 1 on |
+| `ForexAI  -  LIVE account, trading OFF  (icmarkets-live)` | live account, guard 1 off |
+
+The live title is loud on purpose. **Closing a console kills the process
+attached to it**, so mistaking the real-money window for the lab is a mistake
+worth making hard to make.
+
+You do not have to use the consoles at all, though - each engine has its own log:
+
+```powershell
+Get-Content C:\ForexAI\logs\engine-icmarkets-live.log -Tail 20 -Wait
+```
+
 ### Restarting the LIVE engine
 
 Same as the demo lab, because the live task now executes python directly too:

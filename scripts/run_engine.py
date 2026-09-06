@@ -39,6 +39,37 @@ from engine.registry import build_engine
 from engine.supabase_client import SupabaseClient
 
 
+def _set_console_title(settings: Settings) -> None:
+    r"""Name this engine's console window after the account it is trading.
+
+    Both engines are now started the same way - Task Scheduler executing
+    `.venv\Scripts\python.exe scripts\run_engine.py` - which is what makes
+    restarting them one identical command each. The cost is that their console
+    windows became indistinguishable: same title, same command line, and
+    MainWindowTitle is empty under Windows Terminal's ConPTY, so there was no
+    way to tell at a glance which window was about to trade real money.
+
+    A live window announces itself loudly on purpose. Mistaking the real-money
+    console for the lab - and closing it, which kills the process attached to it
+    - is a mistake worth making hard to make.
+
+    Best effort: a title is a convenience, and failing to set one must never
+    stop an engine. Windows-only, like everything else touching MT5.
+    """
+    try:
+        import ctypes
+
+        if settings.account_key == Settings.model_fields["account_key"].default:
+            title = f"ForexAI  -  DEMO LAB  ({settings.account_key})"
+        elif settings.live_trading_enabled:
+            title = f"*** ForexAI  -  LIVE / REAL MONEY ARMED  ({settings.account_key}) ***"
+        else:
+            title = f"ForexAI  -  LIVE account, trading OFF  ({settings.account_key})"
+        ctypes.windll.kernel32.SetConsoleTitleW(title)
+    except Exception:
+        logging.getLogger("engine").debug("could not set console title", exc_info=True)
+
+
 def _require_pinned(settings: Settings) -> None:
     """A non-default engine must be pinned to its own terminal and account.
 
@@ -221,6 +252,7 @@ def main() -> None:
     )
     if args.env_file:
         logging.getLogger("engine").info("settings loaded from %s", args.env_file)
+    _set_console_title(settings)
     _require_pinned(settings)
     _publish_pid(log_dir, settings.account_key)
 
