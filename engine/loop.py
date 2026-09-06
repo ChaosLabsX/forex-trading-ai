@@ -154,19 +154,12 @@ class EngineLoop:
         else:
             logger.info("engine account: %s (%s)", account.key, account.account_type)
 
-        # TEST_MODE selects sizing style: true = the broker's minimum volume for
-        # the symbol (right for the lab, where trade COUNT is the product),
-        # false = real risk-based sizing. On a live account true is the
-        # dangerous setting - it places real orders at broker minimum and
-        # ignores your risk budget entirely. On $200 that is roughly 15% of the
-        # account on a single 30-pip stop, against the 0.75% actually intended.
-        #
-        # This check is new because the value's source changed. It used to be
-        # forced to false by infra/run-live-engine.ps1 immediately before python
-        # started, so it could not be wrong; now that Task Scheduler runs python
-        # directly it comes from .env.live, where it can simply be absent - and
-        # the default is true. Refusing to start is the only safe response: an
-        # engine that trades the wrong size is worse than one that does not run.
+        # TEST_MODE selects sizing style: true = the broker's minimum volume
+        # (right for the lab, where trade COUNT is the product), false = real
+        # risk-based sizing. On a live account true is the DANGEROUS setting -
+        # it places real orders at broker minimum and ignores risk_pct entirely.
+        # It comes from .env.live, where it can simply be absent, and the
+        # default is true - so refusing to start is the only safe response.
         if account is not None and account.is_live and self._settings.test_mode:
             raise SystemExit(
                 f"Refusing to start: TEST_MODE is true on LIVE account '{account.key}'. "

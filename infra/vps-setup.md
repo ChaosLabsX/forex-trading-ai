@@ -162,61 +162,38 @@ Same as the demo lab, because the live task now executes python directly too:
 Stop-ScheduledTask -TaskName "ForexAI-Engine-Live"; Start-ScheduledTask -TaskName "ForexAI-Engine-Live"
 ```
 
-That is a recent change and the reason is worth knowing, because the old
-behaviour was a real hazard.
-
-The task used to execute `powershell.exe` running `infra/run-live-engine.ps1`,
-which exported the live settings and then launched python as a **child**. Task
-Scheduler owned the wrapper, not the engine. So `Stop-ScheduledTask` killed the
-wrapper and left the engine running - reparented, still polling, still
-heartbeating, still holding its MT5 connection - and starting the task again put
-**two live engines on one account**. That happened on 2026-09-05: `icmarkets-live`
-heartbeat gaps went from a clean ~61s to 20/41/20/40s, the signature of two
-engines on 61s cycles offset from each other. Nothing had traded yet, so it was
-luck rather than design that nothing was double-placed.
-
-Everything built to work around that - process-tree walks over WMI, orphan
-sweeps, pid files - was solving a problem that only existed because of the
-wrapper. The settings it exported now live in `.env.live`, which
-`scripts/run_engine.py` loads via `--env-file`, so Task Scheduler can own the
-engine itself:
+Both tasks execute python directly, so Task Scheduler owns the engine itself:
 
 ```
 Execute : C:\ForexAI\.venv\Scripts\python.exe
 Argument: "C:\ForexAI\scripts\run_engine.py" --env-file "C:\ForexAI\.env.live"
 ```
 
-**Do not "kill every python running run_engine.py".** The demo lab runs the
-identical command line, and stopping the wrong one silently halts the lab that
-is accumulating the 100 trades a readiness verdict needs. Stop the *task*.
+**Never put a launcher script between Task Scheduler and python.** Task Scheduler
+owns what it executes; a wrapper means stopping the task kills the wrapper and
+leaves the engine running, reparented and still holding its MT5 connection - and
+the next start gives you two live engines on one account.
 
-**`infra/restart-live-engine.ps1` still exists** and is worth using when you want
-the restart verified rather than assumed. It stops the task, waits for the engine
-to actually exit, starts it again, and waits for a **new** pid to appear in
-`logs\engine-icmarkets-live.pid` - which `run_engine.py` writes at startup - then
-confirms the `attached:` line for this restart specifically. Plain Stop/Start is
-enough; this tells you it worked.
+**Do not "kill every python running run_engine.py"** either. The demo lab runs
+the identical command line, and stopping the wrong one silently halts the lab
+that is accumulating the trades a readiness verdict needs. Stop the *task*.
 
-**Guards that moved.** `run-live-engine.ps1` used to refuse to start if the live
-credentials were blank. Those checks now live in `scripts/run_engine.py`
-(`_require_pinned`: account key, terminal path must be a real file, login,
-password, server) and `engine/loop.py` (refuses `TEST_MODE=true` on a live
-account, which would size real orders at the broker minimum and ignore
-`risk_pct`). They had to move: a guard that lives only in a launcher you have
-stopped using is not a guard.
+`infra/restart-live-engine.ps1` does the same restart but verifies it: it waits
+for the old engine to exit, for a **new** pid in `logs\engine-icmarkets-live.pid`,
+and for this restart's own `attached:` line. Plain Stop/Start is enough; this
+tells you it worked.
 
-### 7. (Optional) Add the LIVE account's second engine
+**Startup guards** live in the engine, so they apply however it was started:
+`scripts/run_engine.py` refuses a non-default account that is not fully pinned
+(account key, terminal path as a real file, login, password, server), and
+`engine/loop.py` refuses `TEST_MODE=true` on a live account.
 
-**This section is written for the setup stage, when the live account held $0 and
-every guard was shut.** That is no longer the state: since 2026-09-05 the account
-is funded with $200 and `london_breakout_v1` trades it for real. Whether an
-engine places orders depends on the four guards in
-[`docs/going-live.md`](../docs/going-live.md) - never on a sentence in a runbook.
-(An earlier version of this paragraph said execution was blocked "until
-risk-based position sizing exists". Sizing shipped; the sentence stayed. That is
-the failure mode to watch for in here.)
+### 7. Add the LIVE account's second engine
 
-The steps below are still the right way to stand the second engine up.
+These are the setup steps. Whether the engine then places real orders depends
+on the four guards in [`docs/going-live.md`](../docs/going-live.md) - never on a
+sentence in a runbook. They are currently **open** for one strategy on a funded
+account.
 
 The model is: **two terminals, two engines, two accounts, two log files, one
 repo.** MT5's Python bridge attaches to one terminal per process, so the live
@@ -237,10 +214,12 @@ Start-ScheduledTask -TaskName "ForexAI-Engine-Live"
 Get-Content C:\ForexAI\logs\engine-icmarkets-live.log -Tail 20
 ```
 
-No `.env` edit is needed: `infra/run-live-engine.ps1` sets `ACCOUNT_KEY`,
-`TEST_MODE=false`, `MT5_TERMINAL_PATH` and `DAILY_SUMMARY_ENABLED=false` as
-environment variables, which override `.env` for that process only. Both engines
-therefore run from one checkout with no config duplication.
+`.env.live` is what makes that process the live engine: `ACCOUNT_KEY`, its own
+`MT5_TERMINAL_PATH`, the live credentials, `TEST_MODE=false` and guard 1. It
+layers **over** `.env` rather than replacing it, so Supabase, Telegram and
+Anthropic keys keep coming from `.env` and both engines run from one checkout
+with no config duplication. See `.env.live.example`, and the preflight in
+`setup-live-engine-task.ps1` that refuses to register the task without it.
 
 Expect the log to say the account is blocked - that is the design working, not a
 fault. The dashboard's Accounts section will show the live engine alongside the

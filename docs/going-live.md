@@ -1,51 +1,65 @@
 # Going live
 
-Everything needed to trade the real IC Markets account is **built and tested**.
-Nothing about it is half-finished. It is switched off on purpose.
+**Live trading is ON, for exactly one strategy, on a funded account.** Read the
+current state below before touching anything.
 
 This document is the whole procedure. It assumes no memory of the conversation
-that produced it - if you are a future reader (human or AI) with no context,
-this page plus `docs/safety-rails.md` is all you need.
-
-## The one thing that has to happen first
-
-**A strategy must reach `readiness = 'ready'`.** That is not a judgement call or
-a config toggle - `engine/evaluator.py` grants it only when a bootstrap 95%
-confidence interval on the strategy's expectancy sits **entirely above zero**
-across at least `readiness_min_trades_ready` (100) closed demo trades, and it
-survives the profit-factor and drawdown vetoes.
-
-As of writing, **no strategy has ever been Ready**, and the reference strategy
-`ema_trend_v1` showed no demonstrated edge in backtest. Expect this to take
-months, and expect the honest answer to sometimes be "this strategy never earns
-it." That is the system working. Do not route around it.
+that produced it - if you are a future reader (human or AI) with no context, this
+page plus [`safety-rails.md`](safety-rails.md) is all you need.
 
 > None of this is financial advice. The code can tell you whether an edge is
 > statistically demonstrated; it cannot tell you whether to risk your money.
 
+## Current state (2026-09-05)
+
+| | |
+|---|---|
+| Account | `icmarkets-live`, IC Markets, MT5 **#8050468** |
+| Funded | **$200** |
+| Trading | `london_breakout_v1` **only** - every other strategy is `enabled=false` on live |
+| Risk | `strategy_accounts.risk_pct = 0.75` (~$1.50 a trade) |
+| Guard 4 | satisfied by `live_override=true`, **not** by a READY verdict |
+
+**Nothing has ever been READY.** `london_breakout_v1` is `almost_ready`: +0.126R
+over 50 demo trades, against a spread of 1.24R. Proving that edge is real would
+take roughly 369 trades - about 18 months. This is a deliberate bet taken with
+the owner's eyes open, and the $200 is sized as tuition. Do not let anything you
+write imply the edge is settled.
+
+The demo lab keeps running regardless, and remains the only thing that can
+produce a real READY verdict.
+
 ## The four guards
 
-All four are independent. Live orders require **all four** to be deliberately
-undone - no single mistake, typo, or forgotten flag can start live trading.
+All four are independent. A live order requires **all four** to be open, so no
+single mistake, typo or forgotten flag can start live trading.
 
-| # | Guard | Where | Default |
+| # | Guard | Where | Current |
 |---|---|---|---|
-| 1 | `LIVE_TRADING_ENABLED` master switch | `.env` / `Settings.live_trading_enabled` | `false` |
-| 2 | `accounts.enabled` for `icmarkets-live` | Supabase | `false` |
-| 3 | `strategy_accounts.enabled` per strategy on live | Supabase / dashboard toggle | `false` |
-| 4 | `strategies.readiness == 'ready'` | Supabase, set only by the evaluator | `not_ready` |
+| 1 | `LIVE_TRADING_ENABLED` master switch | `.env.live` → `Settings.live_trading_enabled` | **on** |
+| 2 | `accounts.enabled` for `icmarkets-live` | Supabase | **true** |
+| 3 | `strategy_accounts.enabled` per strategy on live | Supabase / dashboard toggle | **true for `london_breakout_v1` only** |
+| 4 | `strategies.readiness == 'ready'`, **or** `strategy_accounts.live_override` | Supabase; readiness set only by the evaluator | **override** |
 
-Guard 1 deliberately does **not** mean "sizing is implemented". An earlier
-version derived safety from sizing being missing, which is a trap: the safety
-property silently disappears the moment the feature lands. This switch is
-explicit and orthogonal.
+Guard 1 is account-wide and needs no database change, which makes it the fastest
+way to disarm everything: set `LIVE_TRADING_ENABLED=false` in `.env.live` and
+restart the live engine.
 
-**`TEST_MODE` is not a guard.** It selects sizing *style*: `true` = the demo
-lab's fixed 0.01 micro lot, `false` = real risk-based sizing. On a live account
-`TEST_MODE=true` is the *dangerous* setting - it would place real micro-lot
-orders. `infra/run-live-engine.ps1` correctly sets it `false`.
+Guard 4's override exists so a human can consciously accept an unproven strategy.
+It is the one guard that can be opened without evidence, so treat any request to
+set it as a decision, not a config change.
 
-## What sizing does (already built, `engine/sizing.py`)
+The dashboard shows guard 1's real state on the live account's card, read from
+the engine's own heartbeat rather than assumed - `Real orders are armed.` means
+the running process has it on.
+
+**`TEST_MODE` is not a guard.** It selects sizing *style*: `true` = the broker's
+minimum volume (the lab), `false` = real risk-based sizing. On a live account
+`TEST_MODE=true` is the *dangerous* setting - real orders at broker minimum,
+ignoring `risk_pct`. The engine refuses to start that way
+(`engine/loop.py:run_forever`).
+
+## Sizing (`engine/sizing.py`)
 
 Risk a % of equity per trade, derived from the distance to the stop:
 
@@ -63,61 +77,58 @@ lots         = floor(budget / loss_per_lot / volume_step) × volume_step
   live from MT5 - never hardcoded, because contract specs are the broker's to
   change.
 - **Margin-checked** afterwards: sizing bounds the *loss*, not the capital
-  committed, so a correctly-sized trade can still be unaffordable. Refused if it
-  exceeds `max_margin_use_pct` (25%) of free margin.
+  committed, so a correctly-sized trade can still be unaffordable. Refused above
+  `max_margin_use_pct` (25%) of free margin.
 
-### What varies per strategy
-
-Only one number: `strategy_accounts.risk_pct`. Everything else is either a
-broker fact (lot step, tick value, margin) read at runtime, or the single shared
-sizing function. `NULL` means "use `default_risk_pct`" (0.5%). A per-strategy
-value can lower risk but is clamped to `max_risk_pct` (2%), so a bad row can
+Only one number varies per strategy: `strategy_accounts.risk_pct`. `NULL` means
+`default_risk_pct` (0.5%). It is clamped to `max_risk_pct` (2%), so a bad row can
 never become an outsized bet.
 
-## The procedure
+## Adding another strategy to live
 
-1. **Wait for `readiness = 'ready'`** on the dashboard. You'll get a Telegram
-   promotion alert with the statistics behind it. Don't proceed without it.
-2. **Install the live infrastructure** if you haven't: a *second* MT5 terminal
-   logged into the real account, plus the second engine. See step 6 of
-   [`infra/vps-setup.md`](../infra/vps-setup.md). Do this while still blocked -
-   it proves the plumbing with nothing at stake.
-
-   > **Pin both engines to their own terminal and account first.** If
-   > `MT5_TERMINAL_PATH` is empty, `mt5.initialize()` attaches to whichever
-   > terminal Windows offers - so the moment a second terminal exists, the
-   > *demo* engine can attach to the *live* one and place `TEST_MODE=true`
-   > micro-lot orders on real money while still calling itself the demo lab.
-   > `run-live-engine.ps1` pins the live engine's path; the demo engine's `.env`
-   > must pin its own. Set `MT5_LOGIN`/`MT5_PASSWORD` for both as well, or the
-   > engine cannot verify - or recover - which account it is on. See
-   > [`safety-rails.md`](safety-rails.md).
-3. **Set the risk** for that strategy on the live account. Start at the smallest
-   thing that can trade. In Supabase: `strategy_accounts.risk_pct` for
-   (strategy, `icmarkets-live`).
-4. **Undo the guards, in this order** (each step is verifiable before the next):
-   - Guard 2: set `accounts.enabled = true` for `icmarkets-live`.
-   - Guard 3: enable that one strategy on the live account (dashboard toggle).
-   - Guard 1: add `LIVE_TRADING_ENABLED=true` to the live engine's environment
-     (`infra/run-live-engine.ps1`), then restart `ForexAI-Engine-Live`.
-   - Guard 4 needs nothing - the strategy is already Ready, which is the point.
-5. **Verify on the first real trade.** Watch for the Telegram `OPENED · LIVE`
-   alert. Check the lot size matches what you'd expect from
-   `equity × risk_pct / (stop distance × tick value)`. Confirm the position in
-   the terminal.
-6. **Keep the demo lab running.** It never stops. It is what detects the
-   strategy decaying - and if it does, the evaluator demotes it automatically
-   and the live engine stops trading it without anyone intervening.
+1. **Prefer waiting for `readiness = 'ready'`.** You get a Telegram promotion
+   alert with the statistics behind it. Anything else is an override, and the
+   research log records that mining for variants has produced fewer significant
+   results than chance predicts.
+2. **Set its risk**: `strategy_accounts.risk_pct` for (strategy,
+   `icmarkets-live`). Start at the smallest thing that can trade.
+3. **Open guard 3** for that one strategy - the dashboard toggle.
+4. **Verify on its first real trade.** Watch for the Telegram `OPENED · LIVE`
+   alert, check the lot size against `equity × risk_pct / (stop distance × tick
+   value)`, and confirm `risk_reason` shows risk-based sizing rather than
+   `TEST_MODE`.
 
 ## Rolling back
 
 Any one of these stops live trading immediately:
 
-- Dashboard → toggle the strategy off on the live account.
-- Dashboard → **Pause trading** on the live engine (stops new trades, leaves
-  positions open; MT5 still enforces their stops).
-- Dashboard → **Emergency close all** on the live engine (closes everything now).
-- Set `LIVE_TRADING_ENABLED=false` and restart the live engine.
+- Dashboard → toggle the strategy off on the live account (guard 3).
+- Dashboard → **Pause trading** on the live engine - stops new trades, leaves
+  open positions alone; MT5 still enforces their stops server-side.
+- Dashboard → **Emergency close all** on the live engine - closes everything now.
+- `LIVE_TRADING_ENABLED=false` in `.env.live`, then restart the live engine
+  (guard 1, account-wide).
 
-An automatic demotion (a Ready strategy decaying) does the first one for you and
-sends a Telegram alert saying so.
+An automatic demotion - a READY strategy decaying - does the first one for you
+and sends a Telegram alert saying so. That only applies to strategies that earned
+READY; one running on `live_override` is not demoted, because the override says a
+human decided to ignore the verdict.
+
+## Running the live engine
+
+See [`../infra/vps-setup.md`](../infra/vps-setup.md). In short: the live task
+executes python directly with its own env file, so it restarts like the demo lab:
+
+```powershell
+Stop-ScheduledTask -TaskName "ForexAI-Engine-Live"; Start-ScheduledTask -TaskName "ForexAI-Engine-Live"
+```
+
+`.env.live` is what makes that process the live engine - account key, its own MT5
+terminal, live credentials, `TEST_MODE=false`, and guard 1. It layers over `.env`
+rather than replacing it, so Supabase, Telegram and Anthropic keys keep coming
+from `.env`. See `.env.live.example`.
+
+The engine refuses to start if the live account is not fully pinned (terminal
+path, login, password, server) - `mt5.initialize()` attaches to whatever terminal
+it is pointed at, so an unpinned engine would trade whatever account that
+terminal happens to be showing while labelling everything `icmarkets-live`.

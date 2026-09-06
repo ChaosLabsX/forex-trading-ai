@@ -9,15 +9,11 @@ via a Task Scheduler "at logon" trigger (see infra/setup-scheduled-tasks.ps1)
 rather than a Windows service - MT5's Python bridge needs an interactive
 desktop session, which a Session-0 service doesn't have.
 
-WHY --env-file EXISTS. One repo runs two engines against two accounts, and the
-second one needs different settings. That used to be done by a PowerShell
-wrapper (infra/run-live-engine.ps1) that exported the values and then launched
-python - which meant Task Scheduler owned the WRAPPER, not the engine. Stopping
-the task killed the wrapper and left the engine running, reparented, still
-holding its MT5 connection; starting the task again produced two live engines on
-one account. Loading the file here instead lets the task execute python
-directly, exactly as the demo task does, so Stop-ScheduledTask stops the actual
-engine and a restart is one command for both.
+--env-file lets one repo run two engines against two accounts. It layers over
+.env rather than replacing it, so .env.live holds only what differs (account,
+terminal, credentials, sizing) while Supabase/Telegram/Anthropic keep coming
+from .env. Both scheduled tasks therefore execute python directly, which is why
+Stop-ScheduledTask stops the real engine and restarting either is one command.
 """
 
 from __future__ import annotations
@@ -42,19 +38,12 @@ from engine.supabase_client import SupabaseClient
 def _set_console_title(settings: Settings) -> None:
     r"""Name this engine's console window after the account it is trading.
 
-    Both engines are now started the same way - Task Scheduler executing
-    `.venv\Scripts\python.exe scripts\run_engine.py` - which is what makes
-    restarting them one identical command each. The cost is that their console
-    windows became indistinguishable: same title, same command line, and
-    MainWindowTitle is empty under Windows Terminal's ConPTY, so there was no
-    way to tell at a glance which window was about to trade real money.
+    Both engines run the identical command line, and MainWindowTitle is empty
+    under Windows Terminal's ConPTY, so without this there is no way to tell at
+    a glance which window is about to trade real money. The live title is loud
+    on purpose: closing a console kills the process attached to it.
 
-    A live window announces itself loudly on purpose. Mistaking the real-money
-    console for the lab - and closing it, which kills the process attached to it
-    - is a mistake worth making hard to make.
-
-    Best effort: a title is a convenience, and failing to set one must never
-    stop an engine. Windows-only, like everything else touching MT5.
+    Best effort - failing to set a title must never stop an engine.
     """
     try:
         import ctypes
@@ -75,14 +64,9 @@ def _require_pinned(settings: Settings) -> None:
 
     mt5.initialize() attaches to whatever terminal it is pointed at, and logs in
     only if credentials are supplied. An unpinned second engine therefore trades
-    whatever account its terminal happens to be showing, labels everything with
-    its own ACCOUNT_KEY regardless, and cannot log back in when the terminal is
-    switched. The live engine writing demo trades tagged 'icmarkets-live' is the
-    specific disaster this prevents.
-
-    infra/run-live-engine.ps1 used to enforce this before launching python. That
-    check has to live here now that Task Scheduler starts python directly - a
-    guard that only exists in a launcher you have stopped using is not a guard.
+    whatever account its terminal happens to be showing while labelling
+    everything with its own ACCOUNT_KEY - the live engine writing demo trades
+    tagged 'icmarkets-live' is the disaster this prevents.
 
     The demo lab is exempt on purpose: it attaches to whatever terminal is open
     and logged in, which is how local development works.
@@ -120,24 +104,15 @@ def _require_pinned(settings: Settings) -> None:
 def _publish_pid(log_dir: Path, account_key: str) -> None:
     """Write this process's PID next to its log, and remove it on a clean exit.
 
-    Restarting the live engine used to mean identifying it by walking the
-    Windows process tree over WMI - the only way to tell it from the demo lab,
-    which runs the identical command line. That worked, but `Win32_Process` can
-    hang for minutes on a loaded box, and a restart script that hangs before it
-    stops anything is a restart script that does not restart anything. It
-    happened twice on 2026-09-05.
+    The two engines share a command line, so this file is the only reliable way
+    to tell them apart - see infra/restart-live-engine.ps1, which uses it both
+    to find the right process and as proof that a restart really happened.
 
-    A process that knows its own PID has no reason to make anything guess. The
-    file also gives the restart script a clean success signal: it deletes this
-    file, starts the task, and waits for a NEW pid to appear. That is proof the
-    engine came back, not an inference from a log line that may predate it.
+    The timestamp survives PID recycling: a reader checks that the pid is alive,
+    is a python, and started around this time.
 
-    The timestamp is there to survive PID recycling - Windows reuses PIDs, and a
-    stale file must never point the killer at an unrelated process. A reader
-    checks that the PID is alive, is a python, and started around this time.
-
-    Best-effort by design: a failure to write it must never stop the engine, and
-    a hard kill leaves the file stale, which readers already have to handle.
+    Best effort - a hard kill leaves the file stale, which readers must handle
+    anyway, and failing to write it must never stop the engine.
     """
     try:
         pid_file = log_dir / f"engine-{account_key}.pid"
@@ -199,18 +174,11 @@ def main() -> None:
             env_path = Path(__file__).resolve().parent.parent / env_path
         if not env_path.exists():
             raise SystemExit(f"--env-file '{env_path}' does not exist")
-        # BOTH files, override LAST. pydantic-settings takes a sequence and
-        # gives later entries priority, which is what makes this a DELTA over
-        # .env rather than a replacement for it.
-        #
-        # Passing the override alone is the bug that took the live engine down
-        # on 2026-09-05: .env holds SUPABASE_URL, the service-role key, the
-        # Telegram token and the Anthropic key, and .env.live holds none of
-        # them. The engine loaded, published its pid, and died with no Supabase
-        # to talk to. The old PowerShell wrapper never hit this because it
-        # exported .env.live into the ENVIRONMENT and left .env as the base
-        # underneath - environment beats file, file beats default. This
-        # reproduces exactly that layering.
+        # BOTH files, override LAST - pydantic-settings gives later entries
+        # priority, making this a DELTA over .env rather than a replacement.
+        # The override alone would start the engine with no SUPABASE_URL, no
+        # service-role key and no Telegram token: all of those live in .env and
+        # none of them in .env.live.
         base_env = Path(__file__).resolve().parent.parent / ".env"
         chain = [str(base_env), str(env_path)] if base_env.exists() else [str(env_path)]
         settings = Settings(_env_file=tuple(chain))

@@ -1,70 +1,39 @@
 <#
 Restart the LIVE engine, and prove it came back.
 
-A PLAIN RESTART NOW WORKS. Since the live task started executing python
-directly, this is enough:
+A PLAIN RESTART IS ENOUGH. The live task executes python directly, so Task
+Scheduler owns the engine itself:
 
     Stop-ScheduledTask -TaskName "ForexAI-Engine-Live"
     Start-ScheduledTask -TaskName "ForexAI-Engine-Live"
 
-Task Scheduler owns the engine process itself, so stopping the task stops the
-engine - exactly as it always has for the demo lab. Use this script when you
-want the restart VERIFIED rather than assumed: it waits for the old engine to
-actually exit, and for a NEW pid to appear, and for this restart's own
-'attached:' line. The history below is why that verification exists.
+Use this script when you want the restart VERIFIED rather than assumed: it waits
+for the old engine to actually exit, for a NEW pid to appear, and for this
+restart's own 'attached:' line, then prints what is running.
 
+HOW IT KNOWS WHICH PROCESS IS THE LIVE ENGINE. It reads
+logs\engine-icmarkets-live.pid, which scripts/run_engine.py writes at startup and
+removes on a clean exit. This matters because the demo lab runs the identical
+command line - `.venv\Scripts\python.exe scripts\run_engine.py` - so nothing
+about a process's name or arguments can separate them, and stopping the wrong one
+silently halts the lab that is accumulating the trades a readiness verdict needs.
+Each account writes its own pid file, so there is no ambiguity.
 
-WHY THIS EXISTS. `Stop-ScheduledTask` ends the TASK - the powershell.exe running
-run-live-engine.ps1 - but not the python.exe that wrapper already launched. The
-python is reparented, keeps polling, keeps heartbeating, and keeps holding its
-MT5 connection. Start the task again and you now have TWO live engines on one
-account. That happened on 2026-09-05: icmarkets-live heartbeat gaps went from a
-clean ~61s to 20/41/20/40s, the signature of two engines on 61s cycles offset
-from each other.
-
-WHY IT NO LONGER USES WMI. Telling the live engine apart from the demo lab is
-genuinely hard by inspection - both are `.venv\Scripts\python.exe
-scripts\run_engine.py`, so a command-line match cannot separate them, and
-killing the wrong one stops the lab that is accumulating the 100 trades a
-readiness verdict needs. The first two versions of this script solved that by
-walking the process tree through `Get-CimInstance Win32_Process`. That is
-correct and it is also unusable: on this VPS the query does not come back in any
-reasonable time, and the script hung on its FIRST statement, twice, before
-stopping anything at all. A restart script that hangs before it acts is a
-restart script that does not restart anything.
-
-So the engine now says who it is. scripts/run_engine.py writes its own PID to
-logs\engine-<account>.pid at startup and removes it on a clean exit. Reading a
-file is instant, exact, and cannot confuse the two accounts - each writes its
-own. Everything here is Get-Process and file I/O; there is no WMI left.
-
-That also gives a real success signal. This script deletes the pid file, starts
-the task, and waits for a NEW pid to appear. A new pid is proof the engine came
-back. The previous version inferred success from the last 'attached:' line in
-the log - the last one EVER written - so a restart that never happened still
-printed a success line from the run before it.
-
-FIRST RUN AFTER THIS CHANGE. The engine currently running was started before any
-of this existed, so it has no pid file. The script will say so and list the
-python processes it can see, with how long each has been running, and stop. Pass
-the live one explicitly:
-
-    ... -EnginePid <id>
-
-It refuses to guess rather than risk stopping the demo lab.
+Everything here is Get-Process and file reads. Do NOT reintroduce
+`Get-CimInstance Win32_Process`: on this VPS it does not return in usable time,
+and a restart script that hangs before it acts restarts nothing.
 
 Usage (elevated PowerShell on the VPS):
     powershell -NoProfile -ExecutionPolicy Bypass -File C:\ForexAI\infra\restart-live-engine.ps1
+    ... -EnginePid <id>     when the pid file is missing (see the refusal message)
 #>
 
 param(
     [string]$TaskName = "ForexAI-Engine-Live",
     [string]$RepoDir  = "C:\ForexAI",
     [string]$AccountKey = "icmarkets-live",
-    # Escape hatch for the first run, or any time the pid file is missing.
     [int]$EnginePid = 0,
-    # Deadlines, not durations: each wait returns the moment its condition is
-    # met, and only runs this long when something is actually wrong.
+    # Deadlines, not durations: each wait returns as soon as its condition holds.
     [int]$StopTimeout  = 30,
     [int]$StartTimeout = 60
 )
@@ -87,10 +56,20 @@ function Wait-Until {
     return $false
 }
 
+function Get-RepoPython {
+    # Only pythons from THIS repo's venv, so an unrelated python on the box
+    # cannot break the elimination below. .Path throws for a process this session
+    # cannot open, and $ErrorActionPreference = "Stop" would turn that into an
+    # aborted restart - hence the per-process guard.
+    $exe = Join-Path $RepoDir ".venv\Scripts\python.exe"
+    Get-Process python -ErrorAction SilentlyContinue |
+        Where-Object { try { $_.Path -eq $exe } catch { $false } }
+}
+
 function Read-EnginePid {
-    # Returns the PID only if the file's claim still holds: alive, a python, and
-    # started around when the file was written. Windows recycles PIDs, and a
-    # stale file must never aim Stop-Process at an unrelated process.
+    # Trust the file only while its claim holds: alive, a python, and started
+    # around when the file was written. Windows recycles pids, and a stale file
+    # must never aim Stop-Process at an unrelated process.
     if (-not (Test-Path $pidFile)) { return 0 }
     $lines = @(Get-Content $pidFile -ErrorAction SilentlyContinue)
     if ($lines.Count -lt 1) { return 0 }
@@ -106,8 +85,6 @@ function Read-EnginePid {
     if ($lines.Count -ge 2) {
         $stamp = [datetime]::MinValue
         if ([datetime]::TryParse($lines[1].Trim(), [ref]$stamp)) {
-            # The file is written seconds after start; allow generous slack, but
-            # reject a process that clearly predates or postdates the claim.
             $delta = ($stamp.ToUniversalTime() - $proc.StartTime.ToUniversalTime()).TotalSeconds
             if ($delta -lt -60 -or $delta -gt 600) {
                 Step "  pid $id started ${delta}s from what the pid file claims - refusing it"
@@ -116,23 +93,6 @@ function Read-EnginePid {
         }
     }
     return $id
-}
-
-function Get-RepoPython {
-    # Only pythons running from THIS repo's venv. `Get-Process python` alone is
-    # too broad - any unrelated python on the box (a tool, an installer, a
-    # scratch script) would be counted, and the elimination below needs its
-    # candidate set to be exactly the engines. Process.Path is a plain .NET
-    # property, so this stays WMI-free.
-    #
-    # .Path reads MainModule.FileName, which THROWS for a process this session
-    # cannot open. With $ErrorActionPreference = "Stop" at script scope, one
-    # unreadable python anywhere on the box would abort the whole restart - so
-    # each read is guarded individually and an unreadable process is simply not
-    # a candidate.
-    $exe = Join-Path $RepoDir ".venv\Scripts\python.exe"
-    Get-Process python -ErrorAction SilentlyContinue |
-        Where-Object { try { $_.Path -eq $exe } catch { $false } }
 }
 
 function Show-Candidates {
@@ -152,12 +112,11 @@ function Show-Candidates {
 }
 
 function Resolve-ByElimination {
-    # Not a guess: if the OTHER engines have each positively identified
-    # themselves by pid file, and exactly one python is left over, that one is
-    # ours by deduction. Requires exactly one survivor - two candidates means we
-    # do not know, and this returns 0 rather than pick.
+    # Deduction, not a guess: if the OTHER engines have positively identified
+    # themselves and exactly one venv python is left over, that one is ours. Two
+    # candidates means we do not know, and this returns 0 rather than pick.
     $claimed = @()
-    $stale = @()
+    $stale = 0
     Get-ChildItem (Join-Path $RepoDir "logs\*.pid") -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -ne "engine-$AccountKey.pid" } |
         ForEach-Object {
@@ -168,20 +127,16 @@ function Resolve-ByElimination {
                     $claimed += $n
                     Step "  $($_.Name) claims pid $n"
                 } else {
-                    # A hard kill (which is how Stop-ScheduledTask ends a task)
-                    # skips Python's atexit, so the file outlives the process. It
-                    # is also simply not written yet for the first ~15s of a
-                    # restart, while MetaTrader5 imports. Either way the claim
-                    # subtracts nothing and elimination cannot work.
-                    $stale += "$($_.Name) -> $n"
+                    # A hard kill skips Python's atexit, so the file outlives the
+                    # process; and it is not written for the first several seconds
+                    # of a restart while MetaTrader5 imports.
+                    $stale++
                     Step "  $($_.Name) claims pid $n, which is NOT running (stale)"
                 }
             }
         }
     if ($claimed.Count -eq 0) {
-        if ($stale.Count) {
-            Step "  every other pid file is stale, so nothing can be eliminated"
-        }
+        if ($stale) { Step "  every other pid file is stale, so nothing can be eliminated" }
         return 0
     }
 
@@ -195,16 +150,14 @@ function Resolve-ByElimination {
 }
 
 # ---------------------------------------------------------------- identify ---
-# NOTE the variable name. $targetPid, never $enginePid: PowerShell identifiers
-# are case-INSENSITIVE, so a local `$enginePid = 0` here is the same variable as
-# the -EnginePid parameter and silently discards what the caller passed. That
-# bug shipped, and made -EnginePid do nothing at all.
+# $targetPid, never $enginePid: PowerShell identifiers are case-INSENSITIVE, so a
+# local named $enginePid IS the -EnginePid parameter and silently discards
+# whatever the caller passed.
 Step "Identifying the live engine..."
 $targetPid = 0
 if ($EnginePid -gt 0) {
-    # A hand-typed pid is the one input here that can stop the wrong engine, so
-    # it gets checked harder than anything the script worked out itself. The
-    # table it was copied from may be minutes old by the time it is typed.
+    # A hand-typed pid is the one input that can stop the wrong engine, and the
+    # table it was copied from may be minutes stale. Check it harder.
     $given = Get-RepoPython | Where-Object { $_.Id -eq $EnginePid }
     if (-not $given) {
         Write-Host ""
@@ -232,22 +185,17 @@ if ($EnginePid -gt 0) {
 if ($targetPid -le 0) {
     Write-Host ""
     Write-Host "Cannot identify the live engine: no usable $pidFile." -ForegroundColor Yellow
-    Write-Host "This is expected the first time, for an engine started before it wrote one." -ForegroundColor Yellow
-    Write-Host "In the table below the LIVE engine is normally the one that has been running" -ForegroundColor Yellow
-    Write-Host "LONGEST - the demo lab is the one you just restarted. Check it, then pass it." -ForegroundColor Yellow
     Write-Host "Refusing to guess - the demo lab runs an identical command line, and stopping" -ForegroundColor Yellow
-    Write-Host "the wrong one silently halts the lab. Re-run naming the live engine:" -ForegroundColor Yellow
-    Write-Host "    powershell -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -EnginePid <id>" -ForegroundColor Yellow
+    Write-Host "the wrong one silently halts the lab. In the table below the LIVE engine is" -ForegroundColor Yellow
+    Write-Host "normally the one running LONGEST. Check, then re-run with -EnginePid <id>." -ForegroundColor Yellow
     Show-Candidates
     exit 2
 }
 Step "Live engine is pid $targetPid"
 
 # -------------------------------------------------------------------- stop ---
-Step "Stopping $TaskName (ends the run-live-engine.ps1 wrapper)..."
+Step "Stopping $TaskName..."
 Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-
-# The wrapper dying does NOT take the python with it - that is the whole bug.
 Step "Stopping engine pid $targetPid..."
 Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
 
@@ -258,13 +206,13 @@ $gone = Wait-Until {
 if (-not $gone) {
     Write-Host ""
     Write-Host "ABORTED: pid $targetPid is still running. Starting the task now would put" -ForegroundColor Red
-    Write-Host "TWO engines on the live account, which is the bug this script exists to stop." -ForegroundColor Red
+    Write-Host "TWO engines on the live account." -ForegroundColor Red
     exit 1
 }
 Step "Engine stopped."
 
-# Task Scheduler can still report 'Running' briefly after its process is gone,
-# and Start-ScheduledTask on a Running task is silently DROPPED under
+# Task Scheduler can still report 'Running' just after its process is gone, and
+# Start-ScheduledTask on a Running task is silently DROPPED under
 # MultipleInstances=IgnoreNew - the command succeeds and nothing starts.
 Step "Waiting for Task Scheduler to release '$TaskName'..."
 $null = Wait-Until {
@@ -272,8 +220,8 @@ $null = Wait-Until {
 } $StopTimeout "Task Scheduler to release '$TaskName'"
 
 # ------------------------------------------------------------------- start ---
-# Clear the pid file first: its REAPPEARANCE with a different pid is the proof
-# that the new engine actually came up, rather than something inferred.
+# Clearing the pid file first makes its REAPPEARANCE the proof that a new engine
+# came up, rather than something inferred from a log line that may predate it.
 Remove-Item $pidFile -Force -ErrorAction SilentlyContinue
 $logLinesBefore = 0
 if (Test-Path $log) { $logLinesBefore = @(Get-Content $log).Count }
@@ -281,16 +229,13 @@ if (Test-Path $log) { $logLinesBefore = @(Get-Content $log).Count }
 Step "Starting $TaskName..."
 Start-ScheduledTask -TaskName $TaskName
 
-$newPid = 0
-# Watch for the engine EXITING as well as appearing. A crash after startup
-# deletes the pid file again on the way out (atexit), so waiting only for a new
-# pid means sitting out the full timeout on a failure that already happened -
-# which is exactly what a missing SUPABASE_URL looked like on 2026-09-05.
+# Watch for the engine EXITING as well as appearing: a crash after startup
+# deletes the pid file again on the way out, so "no new pid" would otherwise be
+# indistinguishable from a slow start and cost the full timeout.
 $script:died = $false
 $up = Wait-Until {
     $script:newPid = Read-EnginePid
     if ($script:newPid -gt 0 -and $script:newPid -ne $targetPid) { return $true }
-    # Task Scheduler parks a task back at 'Ready' the moment its process exits.
     if ((Get-ScheduledTask -TaskName $TaskName).State -eq 'Ready') {
         $script:died = $true
         return $true
@@ -298,27 +243,22 @@ $up = Wait-Until {
     return $false
 } $StartTimeout "the new engine to publish its pid" 1000
 
-if ($script:died) {
+if ($script:died -or -not $up) {
     Write-Host ""
-    Write-Host "FAILED: the engine STARTED and then exited - this is a crash, not a slow start." -ForegroundColor Red
+    if ($script:died) {
+        Write-Host "FAILED: the engine STARTED and then exited - a crash, not a slow start." -ForegroundColor Red
+    } else {
+        Write-Host "FAILED: $TaskName did not bring an engine back up." -ForegroundColor Red
+    }
+    Write-Host "Task state:      $((Get-ScheduledTask -TaskName $TaskName).State)"
     Write-Host "Last run result: $((Get-ScheduledTaskInfo -TaskName $TaskName).LastTaskResult)"
-    Write-Host "Run it in a console to see the error directly:" -ForegroundColor Yellow
-    Write-Host "    $RepoDir\.venv\Scripts\python.exe $RepoDir\scripts\run_engine.py --env-file $RepoDir\.env.live" -ForegroundColor Yellow
+    Write-Host "Reproduce it in a console to see the error directly:" -ForegroundColor Yellow
+    Write-Host ("    {0}\.venv\Scripts\python.exe {0}\scripts\run_engine.py --env-file {0}\.env.live" -f $RepoDir) -ForegroundColor Yellow
     Write-Host "Tail of the log:"
     if (Test-Path $log) { Get-Content $log -Tail 25 | ForEach-Object { "    $_" } }
     exit 1
 }
-
-if (-not $up) {
-    Write-Host ""
-    Write-Host "FAILED: $TaskName did not bring an engine back up." -ForegroundColor Red
-    Write-Host "Task state:      $((Get-ScheduledTask -TaskName $TaskName).State)"
-    Write-Host "Last run result: $((Get-ScheduledTaskInfo -TaskName $TaskName).LastTaskResult)"
-    Write-Host "Tail of the log:"
-    if (Test-Path $log) { Get-Content $log -Tail 20 | ForEach-Object { "    $_" } }
-    exit 1
-}
-Step "New engine is pid $newPid - waiting for it to attach to the broker..."
+Step "New engine is pid $($script:newPid) - waiting for it to attach to the broker..."
 
 # ------------------------------------------------------------------ verify ---
 # Read only lines written since the restart began, so 'attached:' cannot be a
@@ -335,7 +275,7 @@ Write-Host ""
 if ($attached) {
     Write-Host "OK - $($attached.Line.Trim())" -ForegroundColor Green
 } else {
-    Write-Host "Engine is up (pid $newPid) but has not logged 'attached:' yet - check $log" -ForegroundColor Yellow
+    Write-Host "Engine is up (pid $($script:newPid)) but has not logged 'attached:' yet - check $log" -ForegroundColor Yellow
 }
 
 Show-Candidates

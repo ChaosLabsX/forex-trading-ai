@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     # experiment, so each gets its own budget.
     #
     # The default suits the DEMO LAB, where money is fake and the only cost of
-    # breadth is broker load. infra/run-live-engine.ps1 pins live to 2, where
+    # breadth is broker load. .env.live pins live to 2, where
     # this is a real risk control rather than a data-collection knob - and live
     # runs one Ready strategy anyway, so per-strategy and per-account coincide.
     max_concurrent_trades: int = 4

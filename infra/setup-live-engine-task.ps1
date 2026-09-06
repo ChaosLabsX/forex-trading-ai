@@ -8,8 +8,7 @@ Run this on the VPS in an Administrator PowerShell, AFTER:
     after a reboot the same way the demo terminal does
 
 Two engines, two terminals, two accounts, two log files, one repo. They share
-nothing but the code - see .env.live.example for how the config is overridden
-per process.
+nothing but the code - see .env.live.example for how the config differs.
 
 The task executes python DIRECTLY, exactly as the demo task does, so Task
 Scheduler owns the engine itself and stopping the task stops the engine:
@@ -17,23 +16,17 @@ Scheduler owns the engine itself and stopping the task stops the engine:
     Stop-ScheduledTask -TaskName "ForexAI-Engine-Live"
     Start-ScheduledTask -TaskName "ForexAI-Engine-Live"
 
-It used to execute powershell.exe running infra/run-live-engine.ps1, which
-exported the live settings and then launched python as a CHILD. Task Scheduler
-owned the wrapper, not the engine - so stopping the task killed the wrapper and
-left the engine running, reparented, still holding its MT5 connection, and
-starting the task again produced two live engines on one account. The settings
-that wrapper exported now live in .env.live, loaded by --env-file.
+Do NOT reintroduce a launcher script between Task Scheduler and python. Task
+Scheduler owns what it executes; a wrapper means stopping the task kills the
+wrapper and leaves the engine running, reparented and still holding its MT5
+connection - and the next start gives you two live engines on one account.
 
 Registering the task does not by itself enable live trading - four independent
-guards do that, and they are described in run-live-engine.ps1's header and
-docs/going-live.md.
+guards do that, and they are documented in docs/going-live.md.
 
-Do NOT read that as "this cannot trade". As of 2026-09-05 all four guards are
-open for london_breakout_v1 on the funded live account, so an engine started by
-this task WILL place real orders. An earlier version of this header claimed
-execution was blocked "until risk-based position sizing exists"; sizing exists,
-and the claim outlived the fact it was based on. Check the guards, never a
-comment.
+Do NOT read that as "this cannot trade". All four guards are currently open for
+london_breakout_v1 on the funded live account, so an engine started by this task
+WILL place real orders. Check the guards, never a comment.
 #>
 
 param(
@@ -46,14 +39,10 @@ $TaskName = "ForexAI-Engine-Live"
 $PythonExe = Join-Path $RepoDir ".venv\Scripts\python.exe"
 $ScriptPath = Join-Path $RepoDir "scripts\run_engine.py"
 $LiveEnv = Join-Path $RepoDir ".env.live"
-$Runner = Join-Path $RepoDir "infra\run-live-engine.ps1"
 $User = "$env:USERDOMAIN\$env:USERNAME"
 
 if (-not (Test-Path (Join-Path $RepoDir ".venv\Scripts\python.exe"))) {
     throw "Python venv not found - run vps-bootstrap.ps1 first."
-}
-if (-not (Test-Path $Runner)) {
-    throw "$Runner not found - git pull first."
 }
 if (-not (Test-Path $TerminalPath)) {
     throw "Live MT5 terminal not found at '$TerminalPath'. Install the second terminal first, or pass -TerminalPath."

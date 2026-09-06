@@ -23,7 +23,7 @@ is **not a safety guard** - on a live account `TEST_MODE=true` is the
   `volume_step` and checked against free margin. **It is implemented and
   tested.** An earlier version of this section claimed it was "not
   implemented", which was false and contradicted this same document's guards
-  section - live trading is off because no strategy has earned it, not because
+  section - see docs/going-live.md for what is actually armed, because
   anything is missing.
 
 ## Circuit breakers (`DefaultRiskEngine.validate_signal`)
@@ -283,7 +283,7 @@ above would have surfaced in five minutes instead of days.
 
 **Read this before installing the live terminal.** `MT5_TERMINAL_PATH` is also
 empty for the demo engine, so a bare `mt5.initialize()` attaches to whichever
-terminal Windows offers. `infra/run-live-engine.ps1` pins the path for the
+terminal Windows offers. `.env.live` pins `MT5_TERMINAL_PATH` for the
 *live* engine, but the *demo* engine has no such pin - so once a second terminal
 exists, the demo engine can attach to the **live** terminal. Its `ACCOUNT_KEY`
 would still say `icmarkets-demo`, so `gating.py` would clear it as the demo
@@ -360,7 +360,7 @@ definition.
 Two things prevent it:
 
 1. **Pin `MT5_TERMINAL_PATH`** in each engine's environment. The live engine
-   already does this (`infra/run-live-engine.ps1`); the demo engine's `.env`
+   already does this (`.env.live`); the demo engine's `.env`
    must too.
 2. **`MT5BrokerAdapter._verify_server()`** refuses to trade when
    `account_info().server` doesn't match `MT5_SERVER`. The servers differ
@@ -379,8 +379,9 @@ whose log is still being written is an orphaned engine, not a stopped one.
 
 ## Live trading is off behind four independent guards
 
-Risk-based position sizing **is implemented and tested** (`engine/sizing.py`);
-live trading is off because no strategy has earned it, not because anything is
+Risk-based position sizing **is implemented and tested** (`engine/sizing.py`).
+Live trading is currently ON for one strategy on `live_override` - see
+docs/going-live.md for the exact state. It is gated by the four guards, not by
 missing. Full procedure in [`going-live.md`](going-live.md). The guards:
 
 1. **`Settings.live_trading_enabled` (`LIVE_TRADING_ENABLED`, default false)** -
