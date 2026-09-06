@@ -130,49 +130,54 @@ arrives - the only test that distinguishes a working watchdog from a silent one.
 
 ### Restarting the LIVE engine
 
-Use the script, not `Stop-ScheduledTask` on its own:
+Same as the demo lab, because the live task now executes python directly too:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File C:\ForexAI\infra\restart-live-engine.ps1
+Stop-ScheduledTask -TaskName "ForexAI-Engine-Live"; Start-ScheduledTask -TaskName "ForexAI-Engine-Live"
 ```
 
-`Stop-ScheduledTask` ends the wrapper but **not** the `python.exe` it already
-launched. That python is reparented and keeps running - still polling, still
-heartbeating, still holding its MT5 connection - so starting the task again
-leaves **two live engines on one account**. It happened on 2026-09-05 and was
-caught in the data rather than the console: `icmarkets-live` heartbeat gaps went
-from a clean ~61s to 20/41/20/40s.
+That is a recent change and the reason is worth knowing, because the old
+behaviour was a real hazard.
 
-And do not reach for "kill every python running run_engine.py" - the demo lab
-runs the identical command line, so that also stops the lab accumulating the 100
-trades a readiness verdict needs.
+The task used to execute `powershell.exe` running `infra/run-live-engine.ps1`,
+which exported the live settings and then launched python as a **child**. Task
+Scheduler owned the wrapper, not the engine. So `Stop-ScheduledTask` killed the
+wrapper and left the engine running - reparented, still polling, still
+heartbeating, still holding its MT5 connection - and starting the task again put
+**two live engines on one account**. That happened on 2026-09-05: `icmarkets-live`
+heartbeat gaps went from a clean ~61s to 20/41/20/40s, the signature of two
+engines on 61s cycles offset from each other. Nothing had traded yet, so it was
+luck rather than design that nothing was double-placed.
 
-**How the script knows which one is the live engine.** It reads
-`logs\engine-icmarkets-live.pid`, which `scripts/run_engine.py` writes at startup
-and removes on a clean exit. Each account writes its own, so the two can never be
-confused, and reading a file is instant.
+Everything built to work around that - process-tree walks over WMI, orphan
+sweeps, pid files - was solving a problem that only existed because of the
+wrapper. The settings it exported now live in `.env.live`, which
+`scripts/run_engine.py` loads via `--env-file`, so Task Scheduler can own the
+engine itself:
 
-Earlier versions worked this out by walking the process tree with
-`Get-CimInstance Win32_Process`. That was correct and unusable: on this VPS the
-query does not return in any reasonable time, and the script hung on its *first
-statement*, before stopping anything - twice. There is no WMI left in it now,
-only `Get-Process` and file reads.
-
-The pid file also supplies the success signal. The script deletes it, starts the
-task, and waits for a **new** pid to appear; that is proof the engine came back
-rather than an inference. (It used to check the log's last `attached:` line -
-the last one *ever* written - so a restart that never happened still printed a
-success line from the run before it.)
-
-**If the pid file is missing** - an engine started before this existed, or one
-that was hard-killed - the script tries one safe deduction: if the *other*
-engines have named themselves by pid file and exactly one venv python is left
-over, that one is ours. Failing that it prints the candidates and stops, rather
-than risk stopping the demo lab. Name it explicitly to proceed:
-
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File C:\ForexAI\infra\restart-live-engine.ps1 -EnginePid 1234
 ```
+Execute : C:\ForexAI\.venv\Scripts\python.exe
+Argument: "C:\ForexAI\scripts\run_engine.py" --env-file "C:\ForexAI\.env.live"
+```
+
+**Do not "kill every python running run_engine.py".** The demo lab runs the
+identical command line, and stopping the wrong one silently halts the lab that
+is accumulating the 100 trades a readiness verdict needs. Stop the *task*.
+
+**`infra/restart-live-engine.ps1` still exists** and is worth using when you want
+the restart verified rather than assumed. It stops the task, waits for the engine
+to actually exit, starts it again, and waits for a **new** pid to appear in
+`logs\engine-icmarkets-live.pid` - which `run_engine.py` writes at startup - then
+confirms the `attached:` line for this restart specifically. Plain Stop/Start is
+enough; this tells you it worked.
+
+**Guards that moved.** `run-live-engine.ps1` used to refuse to start if the live
+credentials were blank. Those checks now live in `scripts/run_engine.py`
+(`_require_pinned`: account key, terminal path must be a real file, login,
+password, server) and `engine/loop.py` (refuses `TEST_MODE=true` on a live
+account, which would size real orders at the broker minimum and ignore
+`risk_pct`). They had to move: a guard that lives only in a launcher you have
+stopped using is not a guard.
 
 ### 7. (Optional) Add the LIVE account's second engine
 

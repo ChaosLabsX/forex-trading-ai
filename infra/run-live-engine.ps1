@@ -1,91 +1,60 @@
 <#
-Launches the LIVE engine process.
+Run the LIVE engine in this console, for a manual/interactive session.
 
-One repo, two engines: this sets environment variables, which OVERRIDE .env
-(pydantic-settings precedence is env vars > .env file > defaults). So the demo
-engine keeps using .env as-is, and this process differs only where it must -
-account, terminal, log file, digest.
+THIS IS NO LONGER HOW THE LIVE ENGINE STARTS ON THE VPS. The scheduled task now
+executes python directly:
 
-*** THIS PROCESS PLACES REAL ORDERS. *** As of 2026-09-05 the account is funded
-with $200 and all four guards are open for london_breakout_v1. This header used
-to say the opposite, and said it for weeks after it stopped being true - so
-treat the list below as a description of the MECHANISM, and go read the actual
-state before you believe anything about it.
+    C:\ForexAI\.venv\Scripts\python.exe C:\ForexAI\scripts\run_engine.py --env-file C:\ForexAI\.env.live
 
-SAFETY - four independent guards decide whether a real order can be placed. All
-four must line up; none is a config typo away. Current state in brackets:
+which is the same shape as the demo task, and it is why restarting the live
+engine is now just:
 
-  1. LIVE_TRADING_ENABLED - the master switch, from .env.live. engine/gating.py
-     blocks every strategy account-wide on a live account while it is off. It is
-     deliberately not derived from any feature being unimplemented, precisely so
-     it cannot evaporate when that feature ships - see docs/going-live.md.
-     [ON]
-  2. accounts.enabled for icmarkets-live (migration 0010).  [true]
-  3. strategy_accounts.enabled, per strategy on this account.
-     [true for london_breakout_v1 ONLY; false for the other five]
-  4. Live requires readiness = 'ready', or live_override on that pair.
-     [london_breakout_v1 is almost_ready, running on live_override = true]
+    Stop-ScheduledTask -TaskName "ForexAI-Engine-Live"
+    Start-ScheduledTask -TaskName "ForexAI-Engine-Live"
 
-To disarm the whole account in one move, set LIVE_TRADING_ENABLED=false in
-.env.live and restart via infra/restart-live-engine.ps1. Guard 1 is account-wide
-and needs no database change.
+WHY THAT CHANGED. This script used to BE the task: Task Scheduler ran
+powershell.exe running this file, and this file exported the live settings and
+then launched python as a child. So Task Scheduler owned the wrapper, not the
+engine. Stopping the task killed this script and left the python running -
+reparented, still polling, still heartbeating, still holding its MT5 connection.
+Starting the task again produced TWO live engines on one account, which happened
+on 2026-09-05 (heartbeat gaps went from a clean ~61s to 20/41/20/40s). Every
+workaround for that - process-tree walks over WMI, pid files, orphan sweeps -
+was solving a problem that only existed because of the wrapper.
 
-NOTE: TEST_MODE=false below is NOT a guard - it selects real risk-based sizing
-over the demo's fixed micro lot, which is the correct setting for a live
-account. (TEST_MODE=true here would be the dangerous one: it would place real
-orders at the broker minimum, ignoring your risk budget entirely.) Safety comes
-from guard 1, not from this.
+The settings this script used to export now live in .env.live, which
+scripts/run_engine.py loads via --env-file. So this file no longer configures
+anything; it is a convenience for running the live engine in a visible console.
+
+SAFETY. Unchanged, and NOT provided by this script. Four independent guards
+decide whether a real order can be placed - see docs/going-live.md. As of
+2026-09-05 all four are open for london_breakout_v1 on a funded account, so this
+command places real trades. The engine itself refuses to start if the live
+account is not fully pinned (MT5_TERMINAL_PATH / login / password / server) or
+if TEST_MODE is true; those checks live in scripts/run_engine.py and
+engine/loop.py, where they apply however the engine was started.
 #>
 
 param(
-    # The LIVE terminal must be a SECOND, separate MT5 installation from the demo
-    # one. MetaTrader5's bridge attaches to one terminal per process, and
-    # mt5.initialize(path=...) is what disambiguates them - without this the
-    # engine could attach to the demo terminal and mislabel everything.
-    [string]$TerminalPath = "C:\Program Files\MetaTrader 5 IC Markets Live\terminal64.exe",
-    [string]$RepoDir = "C:\ForexAI"
+    [string]$RepoDir = "C:\ForexAI",
+    [string]$EnvFile = ""
 )
 
 $ErrorActionPreference = "Stop"
 
-if (-not (Test-Path $TerminalPath)) {
-    throw "Live MT5 terminal not found at '$TerminalPath'. Install a SECOND MT5 terminal for the live account and pass -TerminalPath, or edit the default in this script."
-}
+if (-not $EnvFile) { $EnvFile = Join-Path $RepoDir ".env.live" }
+$python = Join-Path $RepoDir ".venv\Scripts\python.exe"
+$script = Join-Path $RepoDir "scripts\run_engine.py"
 
-# The live engine must NOT inherit the DEMO account's credentials. Settings
-# reads .env for anything absent from the environment, and .env holds the demo
-# login - so without loading live credentials here, this process would tell the
-# LIVE terminal to log into the DEMO account and then label every trade
-# 'icmarkets-live'. .env.live is gitignored; see .env.live.example.
-$LiveEnv = Join-Path $RepoDir ".env.live"
-if (-not (Test-Path $LiveEnv)) {
-    throw "Missing '$LiveEnv'. Copy .env.live.example to .env.live and fill in the LIVE account's MT5_LOGIN / MT5_PASSWORD / MT5_SERVER. Without it this engine would inherit the demo account from .env."
+if (-not (Test-Path $EnvFile)) {
+    throw "Missing '$EnvFile'. Copy .env.live.example to .env.live and fill it in - it is what makes this process the LIVE engine rather than a second demo one."
 }
-Get-Content $LiveEnv | ForEach-Object {
-    $line = $_.Trim()
-    if ($line -and -not $line.StartsWith("#")) {
-        $key, $value = $line -split "=", 2
-        Set-Item -Path "Env:$($key.Trim())" -Value $value.Trim()
-    }
-}
-foreach ($required in @("MT5_LOGIN", "MT5_PASSWORD", "MT5_SERVER")) {
-    if (-not (Get-Item -Path "Env:$required" -ErrorAction SilentlyContinue).Value) {
-        throw "$required is empty in '$LiveEnv' - refusing to start. An unpinned live engine trades whatever account its terminal happens to be on."
-    }
-}
+if (-not (Test-Path $python)) { throw "$python not found - create the venv first." }
 
-$env:MT5_TERMINAL_PATH        = $TerminalPath
-$env:ACCOUNT_KEY              = "icmarkets-live"
-$env:TEST_MODE                = "false"   # real sizing, not the demo micro lot - NOT a guard
-$env:DAILY_SUMMARY_ENABLED    = "false"   # the demo engine sends one digest covering both accounts
-# The default (12) is tuned for the demo lab's data collection. On real money a
-# tight cap is a genuine risk control, not a data-rate knob.
-$env:MAX_CONCURRENT_TRADES    = "2"
-# LIVE_TRADING_ENABLED is intentionally NOT set here: it defaults to false, and
-# turning it on is a deliberate act documented in docs/going-live.md.
+Write-Host "Starting LIVE engine in this console"
+Write-Host "  env:  $EnvFile"
+Write-Host "  log:  $RepoDir\logs\engine-icmarkets-live.log"
+Write-Host "  NOTE: the scheduled task does not use this script - see the header."
+Write-Host ""
 
-Write-Host "Starting LIVE engine (account icmarkets-live, execution disabled by design)"
-Write-Host "  terminal: $TerminalPath"
-Write-Host "  log:      $RepoDir\logs\engine-icmarkets-live.log"
-
-& "$RepoDir\.venv\Scripts\python.exe" "$RepoDir\scripts\run_engine.py"
+& $python $script --env-file $EnvFile

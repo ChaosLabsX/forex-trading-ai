@@ -1,5 +1,18 @@
 <#
-Restart the LIVE engine (ForexAI-Engine-Live) without leaving an orphan behind.
+Restart the LIVE engine, and prove it came back.
+
+A PLAIN RESTART NOW WORKS. Since the live task started executing python
+directly, this is enough:
+
+    Stop-ScheduledTask -TaskName "ForexAI-Engine-Live"
+    Start-ScheduledTask -TaskName "ForexAI-Engine-Live"
+
+Task Scheduler owns the engine process itself, so stopping the task stops the
+engine - exactly as it always has for the demo lab. Use this script when you
+want the restart VERIFIED rather than assumed: it waits for the old engine to
+actually exit, and for a NEW pid to appear, and for this restart's own
+'attached:' line. The history below is why that verification exists.
+
 
 WHY THIS EXISTS. `Stop-ScheduledTask` ends the TASK - the powershell.exe running
 run-live-engine.ps1 - but not the python.exe that wrapper already launched. The

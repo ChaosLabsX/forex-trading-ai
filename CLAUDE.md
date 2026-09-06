@@ -122,6 +122,15 @@ npm install && cp .env.example .env && npm run dev
 ```powershell
 cd C:\ForexAI
 git pull
+
+# demo lab
 Stop-ScheduledTask -TaskName "ForexAI-Engine"; Start-ScheduledTask -TaskName "ForexAI-Engine"
+# live engine - same shape, because its task also executes python directly
+Stop-ScheduledTask -TaskName "ForexAI-Engine-Live"; Start-ScheduledTask -TaskName "ForexAI-Engine-Live"
+
 Get-Content C:\ForexAI\logs\engine-icmarkets-demo.log -Tail 25
 ```
+
+Each engine writes `logs\engine-<account>.pid` at startup, so a restart never
+has to guess which python is which. `infra/restart-live-engine.ps1` uses it to
+verify the live restart actually happened.

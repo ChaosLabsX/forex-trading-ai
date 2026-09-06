@@ -1,16 +1,28 @@
 """The engine's entrypoint - full pipeline (data feed, strategy, risk,
 execution, AI review, command handling).
 
-    python scripts/run_engine.py
+    python scripts/run_engine.py                        # the demo lab, from .env
+    python scripts/run_engine.py --env-file .env.live   # the live engine
 
 Runs standalone during local development (Ctrl+C to stop) and, on the VPS,
 via a Task Scheduler "at logon" trigger (see infra/setup-scheduled-tasks.ps1)
 rather than a Windows service - MT5's Python bridge needs an interactive
 desktop session, which a Session-0 service doesn't have.
+
+WHY --env-file EXISTS. One repo runs two engines against two accounts, and the
+second one needs different settings. That used to be done by a PowerShell
+wrapper (infra/run-live-engine.ps1) that exported the values and then launched
+python - which meant Task Scheduler owned the WRAPPER, not the engine. Stopping
+the task killed the wrapper and left the engine running, reparented, still
+holding its MT5 connection; starting the task again produced two live engines on
+one account. Loading the file here instead lets the task execute python
+directly, exactly as the demo task does, so Stop-ScheduledTask stops the actual
+engine and a restart is one command for both.
 """
 
 from __future__ import annotations
 
+import argparse
 import atexit
 import logging
 import logging.handlers
@@ -25,6 +37,53 @@ from engine.config import Settings
 from engine.loop import EngineLoop
 from engine.registry import build_engine
 from engine.supabase_client import SupabaseClient
+
+
+def _require_pinned(settings: Settings) -> None:
+    """A non-default engine must be pinned to its own terminal and account.
+
+    mt5.initialize() attaches to whatever terminal it is pointed at, and logs in
+    only if credentials are supplied. An unpinned second engine therefore trades
+    whatever account its terminal happens to be showing, labels everything with
+    its own ACCOUNT_KEY regardless, and cannot log back in when the terminal is
+    switched. The live engine writing demo trades tagged 'icmarkets-live' is the
+    specific disaster this prevents.
+
+    infra/run-live-engine.ps1 used to enforce this before launching python. That
+    check has to live here now that Task Scheduler starts python directly - a
+    guard that only exists in a launcher you have stopped using is not a guard.
+
+    The demo lab is exempt on purpose: it attaches to whatever terminal is open
+    and logged in, which is how local development works.
+    """
+    if settings.account_key == Settings.model_fields["account_key"].default:
+        return
+
+    missing = [
+        name.upper()
+        for name in ("mt5_terminal_path", "mt5_login", "mt5_password", "mt5_server")
+        if not getattr(settings, name)
+    ]
+    if missing:
+        raise SystemExit(
+            f"Refusing to start: account_key is '{settings.account_key}' (not the default lab), "
+            f"but {', '.join(missing)} {'is' if len(missing) == 1 else 'are'} empty. "
+            "An engine with no account pinned trades whatever account its terminal happens "
+            "to be on. Fill these in the env file this process was started with "
+            "(see .env.live.example)."
+        )
+
+    terminal = Path(settings.mt5_terminal_path)
+    # is_file(), not exists(): on Windows a truncated path like "C:" exists (it
+    # resolves to the current directory of that drive), so exists() would wave
+    # through a mangled MT5_TERMINAL_PATH and let the engine attach to whatever
+    # terminal was already open. A terminal64.exe is a file or it is nothing.
+    if not terminal.is_file():
+        raise SystemExit(
+            f"Refusing to start: MT5_TERMINAL_PATH '{terminal}' is not a file. "
+            "The live engine needs its OWN MT5 installation - sharing the demo terminal "
+            "would attach both engines to one account."
+        )
 
 
 def _publish_pid(log_dir: Path, account_key: str) -> None:
@@ -61,6 +120,20 @@ def _publish_pid(log_dir: Path, account_key: str) -> None:
         logging.getLogger("engine").warning("could not write pid file", exc_info=True)
 
 
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__, add_help=True)
+    parser.add_argument(
+        "--env-file",
+        default=None,
+        help=(
+            "Env file to load instead of .env. Use for a second engine on another "
+            "account (e.g. --env-file .env.live). Real environment variables still "
+            "win over the file, as pydantic-settings always has it."
+        ),
+    )
+    return parser.parse_args(argv)
+
+
 def main() -> None:
     # Verify TLS against the OS trust store, not OpenSSL's bundled CAs, and do
     # it before anything opens a connection. On the VPS, api.telegram.org's
@@ -84,7 +157,20 @@ def main() -> None:
         except (AttributeError, ValueError):
             pass
 
-    settings = Settings()
+    args = _parse_args()
+    # An explicit path is resolved against the repo root, not the working
+    # directory: Task Scheduler's working directory is not guaranteed, and a
+    # silently-missing env file would start the LIVE engine on the demo
+    # account's defaults.
+    if args.env_file:
+        env_path = Path(args.env_file)
+        if not env_path.is_absolute():
+            env_path = Path(__file__).resolve().parent.parent / env_path
+        if not env_path.exists():
+            raise SystemExit(f"--env-file '{env_path}' does not exist")
+        settings = Settings(_env_file=str(env_path))
+    else:
+        settings = Settings()
 
     # File handler is what makes this work under Task Scheduler, which
     # doesn't capture stdout/stderr the way a manually-redirected console
@@ -108,6 +194,9 @@ def main() -> None:
             logging.StreamHandler(),
         ],
     )
+    if args.env_file:
+        logging.getLogger("engine").info("settings loaded from %s", args.env_file)
+    _require_pinned(settings)
     _publish_pid(log_dir, settings.account_key)
 
     engine = build_engine(settings=settings)
