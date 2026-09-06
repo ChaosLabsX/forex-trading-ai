@@ -202,8 +202,28 @@ function Resolve-ByElimination {
 Step "Identifying the live engine..."
 $targetPid = 0
 if ($EnginePid -gt 0) {
+    # A hand-typed pid is the one input here that can stop the wrong engine, so
+    # it gets checked harder than anything the script worked out itself. The
+    # table it was copied from may be minutes old by the time it is typed.
+    $given = Get-RepoPython | Where-Object { $_.Id -eq $EnginePid }
+    if (-not $given) {
+        Write-Host ""
+        Write-Host "-EnginePid $EnginePid is not a running engine python from $RepoDir\.venv." -ForegroundColor Red
+        Write-Host "It may have been restarted since you read it. Current candidates:" -ForegroundColor Red
+        Show-Candidates
+        exit 2
+    }
+    $claimedElsewhere = Get-ChildItem (Join-Path $RepoDir "logs\*.pid") -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -ne "engine-$AccountKey.pid" } |
+        Where-Object { @(Get-Content $_.FullName -ErrorAction SilentlyContinue)[0].Trim() -eq "$EnginePid" }
+    if ($claimedElsewhere) {
+        Write-Host ""
+        Write-Host "REFUSING: pid $EnginePid is claimed by $($claimedElsewhere.Name) - that is ANOTHER" -ForegroundColor Red
+        Write-Host "account's engine. Stopping it would silently halt that lab." -ForegroundColor Red
+        exit 1
+    }
     $targetPid = $EnginePid
-    Step "  using -EnginePid $targetPid as given"
+    Step "  using -EnginePid $targetPid as given (running since $($given.StartTime))"
 } else {
     $targetPid = Read-EnginePid
     if ($targetPid -le 0) { $targetPid = Resolve-ByElimination }
