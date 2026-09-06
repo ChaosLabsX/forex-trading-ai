@@ -282,10 +282,32 @@ Step "Starting $TaskName..."
 Start-ScheduledTask -TaskName $TaskName
 
 $newPid = 0
+# Watch for the engine EXITING as well as appearing. A crash after startup
+# deletes the pid file again on the way out (atexit), so waiting only for a new
+# pid means sitting out the full timeout on a failure that already happened -
+# which is exactly what a missing SUPABASE_URL looked like on 2026-09-05.
+$script:died = $false
 $up = Wait-Until {
     $script:newPid = Read-EnginePid
-    return ($script:newPid -gt 0 -and $script:newPid -ne $targetPid)
+    if ($script:newPid -gt 0 -and $script:newPid -ne $targetPid) { return $true }
+    # Task Scheduler parks a task back at 'Ready' the moment its process exits.
+    if ((Get-ScheduledTask -TaskName $TaskName).State -eq 'Ready') {
+        $script:died = $true
+        return $true
+    }
+    return $false
 } $StartTimeout "the new engine to publish its pid" 1000
+
+if ($script:died) {
+    Write-Host ""
+    Write-Host "FAILED: the engine STARTED and then exited - this is a crash, not a slow start." -ForegroundColor Red
+    Write-Host "Last run result: $((Get-ScheduledTaskInfo -TaskName $TaskName).LastTaskResult)"
+    Write-Host "Run it in a console to see the error directly:" -ForegroundColor Yellow
+    Write-Host "    $RepoDir\.venv\Scripts\python.exe $RepoDir\scripts\run_engine.py --env-file $RepoDir\.env.live" -ForegroundColor Yellow
+    Write-Host "Tail of the log:"
+    if (Test-Path $log) { Get-Content $log -Tail 25 | ForEach-Object { "    $_" } }
+    exit 1
+}
 
 if (-not $up) {
     Write-Host ""

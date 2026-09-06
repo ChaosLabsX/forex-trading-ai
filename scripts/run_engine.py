@@ -168,7 +168,21 @@ def main() -> None:
             env_path = Path(__file__).resolve().parent.parent / env_path
         if not env_path.exists():
             raise SystemExit(f"--env-file '{env_path}' does not exist")
-        settings = Settings(_env_file=str(env_path))
+        # BOTH files, override LAST. pydantic-settings takes a sequence and
+        # gives later entries priority, which is what makes this a DELTA over
+        # .env rather than a replacement for it.
+        #
+        # Passing the override alone is the bug that took the live engine down
+        # on 2026-09-05: .env holds SUPABASE_URL, the service-role key, the
+        # Telegram token and the Anthropic key, and .env.live holds none of
+        # them. The engine loaded, published its pid, and died with no Supabase
+        # to talk to. The old PowerShell wrapper never hit this because it
+        # exported .env.live into the ENVIRONMENT and left .env as the base
+        # underneath - environment beats file, file beats default. This
+        # reproduces exactly that layering.
+        base_env = Path(__file__).resolve().parent.parent / ".env"
+        chain = [str(base_env), str(env_path)] if base_env.exists() else [str(env_path)]
+        settings = Settings(_env_file=tuple(chain))
         # You do not pass --env-file to run the default lab. If the file leaves
         # ACCOUNT_KEY out, account_key silently falls back to the demo default
         # and this process becomes a SECOND engine on the demo account - two
@@ -220,4 +234,17 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except SystemExit:
+        # A deliberate refusal from one of the guards. It has already said why,
+        # in its own words, and a traceback would only bury it.
+        raise
+    except BaseException:
+        # Anything else has to reach the log file, because under Task Scheduler
+        # there is no console and stderr goes nowhere. Without this the engine
+        # dies leaving a log that simply stops mid-sentence and a task whose only
+        # evidence is "Last run result: 1" - which is exactly how the missing
+        # Supabase credentials above stayed invisible.
+        logging.getLogger("engine").exception("engine exited on an unhandled exception")
+        raise
