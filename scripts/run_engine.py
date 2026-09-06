@@ -169,6 +169,17 @@ def main() -> None:
         if not env_path.exists():
             raise SystemExit(f"--env-file '{env_path}' does not exist")
         settings = Settings(_env_file=str(env_path))
+        # You do not pass --env-file to run the default lab. If the file leaves
+        # ACCOUNT_KEY out, account_key silently falls back to the demo default
+        # and this process becomes a SECOND engine on the demo account - two
+        # engines reconciling each other's trades, which is the data-destroying
+        # failure migration 0013 had to repair by hand. Refuse instead.
+        if settings.account_key == Settings.model_fields["account_key"].default:
+            raise SystemExit(
+                f"Refusing to start: --env-file '{env_path}' does not set ACCOUNT_KEY, "
+                f"so this process would run as '{settings.account_key}' - a second engine "
+                "on the demo account. Add ACCOUNT_KEY (see .env.live.example)."
+            )
     else:
         settings = Settings()
 
