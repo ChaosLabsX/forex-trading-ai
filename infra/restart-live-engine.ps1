@@ -157,17 +157,33 @@ function Resolve-ByElimination {
     # ours by deduction. Requires exactly one survivor - two candidates means we
     # do not know, and this returns 0 rather than pick.
     $claimed = @()
+    $stale = @()
     Get-ChildItem (Join-Path $RepoDir "logs\*.pid") -ErrorAction SilentlyContinue |
         Where-Object { $_.Name -ne "engine-$AccountKey.pid" } |
         ForEach-Object {
             $first = @(Get-Content $_.FullName -ErrorAction SilentlyContinue)[0]
             $n = 0
             if ($first -and [int]::TryParse($first.Trim(), [ref]$n)) {
-                $claimed += $n
-                Step "  $($_.Name) claims pid $n"
+                if (Get-Process -Id $n -ErrorAction SilentlyContinue) {
+                    $claimed += $n
+                    Step "  $($_.Name) claims pid $n"
+                } else {
+                    # A hard kill (which is how Stop-ScheduledTask ends a task)
+                    # skips Python's atexit, so the file outlives the process. It
+                    # is also simply not written yet for the first ~15s of a
+                    # restart, while MetaTrader5 imports. Either way the claim
+                    # subtracts nothing and elimination cannot work.
+                    $stale += "$($_.Name) -> $n"
+                    Step "  $($_.Name) claims pid $n, which is NOT running (stale)"
+                }
             }
         }
-    if ($claimed.Count -eq 0) { return 0 }
+    if ($claimed.Count -eq 0) {
+        if ($stale.Count) {
+            Step "  every other pid file is stale, so nothing can be eliminated"
+        }
+        return 0
+    }
 
     $left = @(Get-RepoPython | Where-Object { $claimed -notcontains $_.Id })
     if ($left.Count -eq 1) {
@@ -179,43 +195,49 @@ function Resolve-ByElimination {
 }
 
 # ---------------------------------------------------------------- identify ---
+# NOTE the variable name. $targetPid, never $enginePid: PowerShell identifiers
+# are case-INSENSITIVE, so a local `$enginePid = 0` here is the same variable as
+# the -EnginePid parameter and silently discards what the caller passed. That
+# bug shipped, and made -EnginePid do nothing at all.
 Step "Identifying the live engine..."
-$enginePid = 0
+$targetPid = 0
 if ($EnginePid -gt 0) {
-    $enginePid = $EnginePid
-    Step "  using -EnginePid $enginePid as given"
+    $targetPid = $EnginePid
+    Step "  using -EnginePid $targetPid as given"
 } else {
-    $enginePid = Read-EnginePid
-    if ($enginePid -le 0) { $enginePid = Resolve-ByElimination }
+    $targetPid = Read-EnginePid
+    if ($targetPid -le 0) { $targetPid = Resolve-ByElimination }
 }
 
-if ($enginePid -le 0) {
+if ($targetPid -le 0) {
     Write-Host ""
     Write-Host "Cannot identify the live engine: no usable $pidFile." -ForegroundColor Yellow
     Write-Host "This is expected the first time, for an engine started before it wrote one." -ForegroundColor Yellow
+    Write-Host "In the table below the LIVE engine is normally the one that has been running" -ForegroundColor Yellow
+    Write-Host "LONGEST - the demo lab is the one you just restarted. Check it, then pass it." -ForegroundColor Yellow
     Write-Host "Refusing to guess - the demo lab runs an identical command line, and stopping" -ForegroundColor Yellow
     Write-Host "the wrong one silently halts the lab. Re-run naming the live engine:" -ForegroundColor Yellow
     Write-Host "    powershell -NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -EnginePid <id>" -ForegroundColor Yellow
     Show-Candidates
     exit 2
 }
-Step "Live engine is pid $enginePid"
+Step "Live engine is pid $targetPid"
 
 # -------------------------------------------------------------------- stop ---
 Step "Stopping $TaskName (ends the run-live-engine.ps1 wrapper)..."
 Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
 
 # The wrapper dying does NOT take the python with it - that is the whole bug.
-Step "Stopping engine pid $enginePid..."
-Stop-Process -Id $enginePid -Force -ErrorAction SilentlyContinue
+Step "Stopping engine pid $targetPid..."
+Stop-Process -Id $targetPid -Force -ErrorAction SilentlyContinue
 
 $gone = Wait-Until {
-    -not (Get-Process -Id $enginePid -ErrorAction SilentlyContinue)
-} $StopTimeout "engine pid $enginePid to exit"
+    -not (Get-Process -Id $targetPid -ErrorAction SilentlyContinue)
+} $StopTimeout "engine pid $targetPid to exit"
 
 if (-not $gone) {
     Write-Host ""
-    Write-Host "ABORTED: pid $enginePid is still running. Starting the task now would put" -ForegroundColor Red
+    Write-Host "ABORTED: pid $targetPid is still running. Starting the task now would put" -ForegroundColor Red
     Write-Host "TWO engines on the live account, which is the bug this script exists to stop." -ForegroundColor Red
     exit 1
 }
@@ -242,7 +264,7 @@ Start-ScheduledTask -TaskName $TaskName
 $newPid = 0
 $up = Wait-Until {
     $script:newPid = Read-EnginePid
-    return ($script:newPid -gt 0 -and $script:newPid -ne $enginePid)
+    return ($script:newPid -gt 0 -and $script:newPid -ne $targetPid)
 } $StartTimeout "the new engine to publish its pid" 1000
 
 if (-not $up) {
