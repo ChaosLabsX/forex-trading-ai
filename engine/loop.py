@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from engine import review_scoring
 from engine.config import Settings
+from engine.core.interfaces.market_data import SymbolUnavailableError
 from engine.core.interfaces.strategy import StrategyContext
 from engine.core.models import (
     Candle,
@@ -121,6 +122,8 @@ class EngineLoop:
         # purpose: a restart just repeats one full upsert per symbol/timeframe,
         # which doubles as gap backfill for however long the engine was down.
         self._last_persisted_bar: dict[tuple[str, Timeframe], datetime] = {}
+        # Symbols this account's server does not carry - see _skip_unavailable.
+        self._unavailable_instruments: set[str] = set()
         self._paused = False
         # Instruments are whatever the configured strategies actually ask for -
         # never a second hardcoded list to fall out of sync with them. Widening a
@@ -391,6 +394,8 @@ class EngineLoop:
                 logger.exception("failed to fetch upcoming news events")
 
         for symbol in self._instruments:
+            if symbol in self._unavailable_instruments:
+                continue
             candles_by_timeframe: dict[Timeframe, list[Candle]] = {}
             for timeframe in CONTEXT_TIMEFRAMES:
                 try:
@@ -417,13 +422,42 @@ class EngineLoop:
                         symbol, timeframe.value, len(candles), len(to_persist),
                     )
                     candles_by_timeframe[timeframe] = _closed_only(candles)
+                except SymbolUnavailableError as exc:
+                    # Absent on this server, so the other timeframes cannot
+                    # succeed either - stop, rather than fail three times.
+                    self._skip_unavailable(symbol, exc)
+                    break
                 except Exception:
                     logger.exception("failed to refresh candles for %s %s", symbol, timeframe.value)
+
+            if symbol in self._unavailable_instruments:
+                continue
 
             if account_state is not None:
                 self._evaluate_strategies(
                     symbol, candles_by_timeframe, account_state, open_positions, upcoming_news
                 )
+
+    def _skip_unavailable(self, symbol: str, exc: Exception) -> None:
+        """Retire a symbol this account's server does not have, loudly and once.
+
+        Strategy instrument lists are global while symbol availability is per
+        server, so the two disagree the moment a second account is added on a
+        different one. MidDE60 is the live account's case: valid on the demo
+        server, absent on ICMarketsSC-MT5-3, and retried every 60s for 16 hours
+        - 2775 tracebacks, which is how a real error goes unnoticed.
+
+        One alert, then silence. Skips last for the life of the process: a
+        broker adding a symbol is rare enough that the next restart is a fine
+        time to notice, and re-probing forever is the behaviour being removed.
+        """
+        self._unavailable_instruments.add(symbol)
+        logger.error("%s: skipping for this run - %s", symbol, exc)
+        _notify_all(
+            self._engine,
+            "symbol_unavailable",
+            engine_event("🚫", "SYMBOL UNAVAILABLE", self._account_label(), f"{symbol} - skipped"),
+        )
 
     def _refresh_ownership(self) -> None:
         """Map broker ticket -> owning strategy, from our own trades table.
