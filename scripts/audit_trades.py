@@ -212,8 +212,46 @@ def shape(trades: list[dict], strategy: str) -> None:
     print()
 
 
+def out_of_window(trades: list[dict]) -> None:
+    """Trades a strategy could not legitimately have taken at that hour.
+
+    Sharper than flagging whole drifted days, and it needs no prior knowledge of
+    when a clock was wrong: it asks whether the trade sits inside the window the
+    strategy itself declares. A bar labelled hour H closes at H+1 and the engine
+    opens just after, so the admissible OPEN hours are the declared bar hours
+    shifted by one - getting that off by one makes every legitimate trade at the
+    window's last hour look spurious.
+
+    Only london_breakout_v1 declares a plain hour window; the others gate on
+    session overlap or indicator state, which this cannot express.
+    """
+    from engine.plugins.strategies.london_breakout_v1 import (
+        TRIGGER_END_HOUR_UTC as end,
+        TRIGGER_START_HOUR_UTC as start,
+    )
+
+    print(f"6. WINDOW - london_breakout_v1 admits opens at "
+          f"{start + 1:02d}:00-{end:02d}:00 UTC (bar hours {start}-{end - 1})")
+    rogue = [
+        t for t in trades
+        if t["strategy_name"] == "london_breakout_v1"
+        and not (start + 1) <= int((t["opened_at"] or "T99")[11:13]) <= end
+    ]
+    if not rogue:
+        print("   none - every trade sits inside the declared window")
+        print()
+        return
+    for t in rogue:
+        r = realized_r(t)
+        print(f"   {t['opened_at'][:16]}  {t['account_key']:16} {t['symbol']:7} "
+              f"{(f'{r:+.2f}R' if r is not None else '-'):>8}  INADMISSIBLE")
+    print("   The engine's clock was wrong when these fired, so they are evidence")
+    print("   of nothing. Exclude them before reading any verdict.")
+    print()
+
+
 def clock(trades: list[dict]) -> None:
-    print("6. CLOCK - trades opened while that engine's bars were mislabelled")
+    print("7. CLOCK - trades opened on a day that engine's clock was known bad")
     flagged: dict[str, Counter] = defaultdict(Counter)
     for t in trades:
         day = (t["opened_at"] or "")[:10]
@@ -252,6 +290,7 @@ def main() -> None:
     stops(trades)
     costs(trades)
     shape(trades, args.strategy)
+    out_of_window(trades)
     clock(trades)
 
 

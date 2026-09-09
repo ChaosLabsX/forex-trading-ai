@@ -370,11 +370,20 @@ was ever claimed.
   future-dated rows into `candles`. Nothing errored; every log line looked
   ordinary. Found only by pairing the live engine's evaluations against the
   demo's and noticing they disagreed about what hour it was.
-  **Affected data:** the demo drifted 2026-08-30/31 (7h) and 2026-09-05 onward
-  (18h), which covers **4 of the 51** recorded `london_breakout_v1` demo trades.
-  That matters more than 4/51 suggests, because the +0.126R verdict is carried
-  by its best three trades - treat those four as suspect when the 100-trade
-  verdict is read. The live account was unaffected after its 09-07 restart.
+  **Affected data.** A day-level flag over the drifted days is too coarse: what
+  matters is whether a trade opened inside the window its strategy declares.
+  Checked that way - a bar labelled hour H closes at H+1, so `london_breakout_v1`'s
+  bar hours 07-10 admit opens at 08:00-11:00 UTC - exactly **one** of its 51 demo
+  trades is inadmissible: `2026-09-09 01:00 EURUSD, +1.78R`, fired while the demo
+  believed 01:00 was the London open.
+
+  One trade, but it was a large winner on a 51-trade sample: it moved the headline
+  from **+0.1260R (n=50)** to **+0.1585R (n=51)** - **20% of the measured edge,
+  from a setup the strategy would never have taken.** The live engine, whose clock
+  was correct, declined the same signal at the same second: "outside the
+  London-open trigger window (bar hour 00:00 UTC)". That pairing is what proves
+  the trade was spurious rather than lucky. Exclude it from the 100-trade
+  verdict. The live account was unaffected throughout.
   **Fixed** by establishing tick freshness before measuring, refusing rather
   than falling back to 0.0 (which was itself a 3-hour error), and re-measuring
   periodically; `scripts/check_engine_health.py` now reports drift directly.
