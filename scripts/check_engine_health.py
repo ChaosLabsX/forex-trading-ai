@@ -5,13 +5,16 @@ broken, or is there simply nothing to trade?" A blocked strategy and a working
 one that found no setup both produce silence, and an absence of errors cannot
 tell them apart.
 
-Three things it reads, in the order they can fail:
+Four things it reads, in the order they can fail:
 
   1. HEARTBEAT - is the process alive, is the broker attached, and is guard 1
      (LIVE_TRADING_ENABLED) on?
-  2. GATE - guards 2/3/4, through the engine's own StrategyGate, so this can
+  2. CLOCKS - is each engine stamping bars with the right time? The quietest
+     failure here: a stale-tick measurement of the broker's UTC offset moved
+     the demo lab's bars 18 hours and nothing errored for three days.
+  3. GATE - guards 2/3/4, through the engine's own StrategyGate, so this can
      never drift from what the engine will actually do.
-  3. ACTIVITY - the signals table stores a row for EVERY evaluation, fired or
+  4. ACTIVITY - the signals table stores a row for EVERY evaluation, fired or
      not, with the reason. Non-firing rows are positive proof a strategy is
      running; the demo lab, which runs the identical code, is the control for
      whether live is behaving normally.
@@ -35,6 +38,7 @@ a health check that garbles its own separators invites being ignored.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -55,6 +59,10 @@ STALE_HEARTBEAT_SECONDS = 240
 # evaluations that reached the strategy's actual premise are the informative
 # ones, and they are swamped ~7:1 by these.
 WINDOW_PREFIX = "outside"
+
+# Reasons carry the bar they judged, e.g. "(bar hour 09:00 UTC)" - the only
+# record of what time each engine THOUGHT it was.
+BAR_HOUR = re.compile(r"bar hour (\d{2}):00 UTC")
 
 
 def _age(iso: str) -> timedelta:
@@ -105,6 +113,65 @@ def heartbeats(supabase: SupabaseClient, accounts: list[dict]) -> dict[str, bool
         print(f"   {key:18} {state:8} {_fmt_age(age):>9}  {broker}{note}")
     print()
     return guard1
+
+
+def clocks(supabase: SupabaseClient, accounts: list[dict]) -> None:
+    """Is each engine stamping bars with the right time?
+
+    A wrong server-time offset is the quietest failure this system has: no
+    error, no alert, every log line plausible, and the strategies quietly
+    judging the wrong bars. It cost the demo lab three days in September 2026.
+
+    Two independent tells. A candle dated in the future is proof on its own -
+    no correct engine can write one. And every signals row records the wall
+    clock it was written at plus, in its reason text, the bar hour it judged;
+    the SMALLEST lag across recent rows is 1 hour for a healthy engine (H1
+    strategies judge the bar that just closed, H4 ones lag up to 4), so
+    anything else is the offset being wrong by that much.
+    """
+    now = datetime.now(timezone.utc)
+    print("CLOCKS")
+
+    future = supabase.select(
+        "candles",
+        {
+            "time": f"gt.{now.isoformat()}",
+            "select": "symbol,timeframe,time",
+            "order": "time.desc",
+            "limit": "1",
+        },
+    )
+    if future:
+        f = future[0]
+        ahead = (datetime.fromisoformat(f["time"]) - now).total_seconds() / 3600
+        print(f"   candles table holds FUTURE-DATED bars - newest {f['symbol']} {f['timeframe']}"
+              f" at {f['time'][:19]} ({ahead:+.1f}h). Some engine's clock is wrong.")
+
+    for account in accounts:
+        rows = supabase.select(
+            "signals",
+            {
+                "account_key": f"eq.{account['key']}",
+                "select": "created_at,reason",
+                "order": "created_at.desc",
+                "limit": "200",
+            },
+        )
+        lags = [
+            (int(r["created_at"][11:13]) - int(m.group(1))) % 24
+            for r in rows
+            if (m := BAR_HOUR.search(r["reason"]))
+        ]
+        if not lags:
+            print(f"   {account['key']:18} no dated evaluations in the last 200 rows")
+            continue
+        lag = min(lags)
+        if lag == 1:
+            print(f"   {account['key']:18} OK - bars stamped correctly")
+        else:
+            print(f"   {account['key']:18} DRIFTED {(lag - 1) % 24}h - this engine is judging the "
+                  f"wrong bars. Restart it while the market is OPEN.")
+    print()
 
 
 def gate_report(
@@ -227,6 +294,7 @@ def main() -> None:
     )
 
     guard1 = heartbeats(supabase, accounts)
+    clocks(supabase, accounts)
     for account in accounts:
         if account["account_type"] == "live":
             gate_report(supabase, settings, account, known, guard1[account["key"]])

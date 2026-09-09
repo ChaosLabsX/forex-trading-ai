@@ -7,7 +7,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from engine import review_scoring
 from engine.config import Settings
-from engine.core.interfaces.market_data import SymbolUnavailableError
+from engine.core.interfaces.market_data import MarketDataUnavailable, SymbolUnavailableError
 from engine.core.interfaces.strategy import StrategyContext
 from engine.core.models import (
     Candle,
@@ -124,6 +124,9 @@ class EngineLoop:
         self._last_persisted_bar: dict[tuple[str, Timeframe], datetime] = {}
         # Symbols this account's server does not carry - see _skip_unavailable.
         self._unavailable_instruments: set[str] = set()
+        # Last provider-wide outage reason, so it is logged on change, not on
+        # every symbol of every cycle.
+        self._market_data_block: str | None = None
         self._paused = False
         # Instruments are whatever the configured strategies actually ask for -
         # never a second hardcoded list to fall out of sync with them. Widening a
@@ -422,6 +425,16 @@ class EngineLoop:
                         symbol, timeframe.value, len(candles), len(to_persist),
                     )
                     candles_by_timeframe[timeframe] = _closed_only(candles)
+                    self._market_data_block = None
+                except MarketDataUnavailable as exc:
+                    # Provider-wide: no symbol can succeed this cycle, so stop
+                    # instead of raising the same thing N times. Most often the
+                    # broker's UTC offset is not measurable yet because the
+                    # market is closed - normal, and self-healing at the open.
+                    if self._market_data_block != str(exc):
+                        self._market_data_block = str(exc)
+                        logger.warning("market data unavailable: %s", exc)
+                    return
                 except SymbolUnavailableError as exc:
                     # Absent on this server, so the other timeframes cannot
                     # succeed either - stop, rather than fail three times.

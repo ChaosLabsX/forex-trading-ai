@@ -323,6 +323,24 @@ was ever claimed.
   *marginal*, only the high-volatility trades survive to be recorded - selection
   on a variable plausibly correlated with outcome, which is a real bias, not
   merely a smaller sample.
+- **A wrong clock is the quietest way to invalidate a result.** MT5 reports every
+  timestamp in the broker's server time, and the engine measured the UTC offset
+  as `last tick - now`. That is only the offset if the tick is *current*. The
+  demo engine restarted on Sunday 2026-09-06, measured against a 31-hour-old
+  tick, and spent three days stamping bars ~18 hours into the future - which
+  moved `london_breakout_v1`'s 07:00-11:00 UTC window to 01:00-05:00, so the lab
+  traded the *Asian session* while labelling it the London open. It also wrote
+  future-dated rows into `candles`. Nothing errored; every log line looked
+  ordinary. Found only by pairing the live engine's evaluations against the
+  demo's and noticing they disagreed about what hour it was.
+  **Affected data:** the demo drifted 2026-08-30/31 (7h) and 2026-09-05 onward
+  (18h), which covers **4 of the 51** recorded `london_breakout_v1` demo trades.
+  That matters more than 4/51 suggests, because the +0.126R verdict is carried
+  by its best three trades - treat those four as suspect when the 100-trade
+  verdict is read. The live account was unaffected after its 09-07 restart.
+  **Fixed** by establishing tick freshness before measuring, refusing rather
+  than falling back to 0.0 (which was itself a 3-hour error), and re-measuring
+  periodically; `scripts/check_engine_health.py` now reports drift directly.
 - **Trade frequency is a first-class design constraint.** `ema_trend_v1` trades
   ~19/yr on 4 symbols, so the lab's 100-trade bar sat ~5 years away and no
   verdict could ever arrive. A strategy that cannot be judged in a useful

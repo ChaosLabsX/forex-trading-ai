@@ -5,7 +5,7 @@ import MetaTrader5 as mt5
 from engine.config import Settings
 from engine.core.interfaces.market_data import MarketDataProvider, SymbolUnavailableError
 from engine.core.models import Candle, Tick, Timeframe
-from engine.plugins.brokers.mt5_time import measure_server_utc_offset_seconds, server_epoch_to_utc
+from engine.plugins.brokers.mt5_time import ServerClock, server_epoch_to_utc
 
 _TIMEFRAME_MAP = {
     Timeframe.M1: mt5.TIMEFRAME_M1,
@@ -28,15 +28,14 @@ class MT5MarketDataProvider(MarketDataProvider):
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._server_utc_offset_seconds: float | None = None
+        # Lazy: this class has no connect() hook of its own (it rides on the
+        # broker adapter's mt5.initialize()), so the clock measures on first
+        # use. ServerClock owns the caching, refreshing and refusal - see
+        # mt5_time.py for why measuring this wrong is so quiet.
+        self._clock = ServerClock()
 
     def _offset(self) -> float:
-        # Lazy + cached: this class has no connect() lifecycle hook of its
-        # own (it rides on the broker adapter's mt5.initialize()), so the
-        # offset is measured once on first use rather than eagerly.
-        if self._server_utc_offset_seconds is None:
-            self._server_utc_offset_seconds = measure_server_utc_offset_seconds()
-        return self._server_utc_offset_seconds
+        return self._clock.offset()
 
     def get_latest_tick(self, symbol: str) -> Tick:
         raw = mt5.symbol_info_tick(symbol)
@@ -45,7 +44,7 @@ class MT5MarketDataProvider(MarketDataProvider):
             raise MT5MarketDataError(f"symbol_info_tick({symbol}) failed: [{code}] {message}")
         return Tick(
             symbol=symbol,
-            time=server_epoch_to_utc(raw.time, self._offset()),
+            time=self._clock.to_utc(raw.time),
             bid=raw.bid,
             ask=raw.ask,
         )
@@ -100,6 +99,8 @@ class MT5MarketDataProvider(MarketDataProvider):
             # recent one, so the diagnosis below would overwrite the reason.
             code, message = mt5.last_error()
             raw = self._retry_or_explain(symbol, timeframe, count, code, message)
+        # Once for the whole batch: every row shares the offset, and a
+        # re-measure mid-batch could split one window across two clocks.
         offset = self._offset()
         return [
             Candle(

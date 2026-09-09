@@ -9,7 +9,7 @@ from engine.config import Settings
 from engine.core.interfaces.broker import BrokerAdapter
 from engine.core.models import AccountState, ClosedTradePnl, Direction, Position, PositionStatus
 from engine.sizing import SymbolLimits
-from engine.plugins.brokers.mt5_time import measure_server_utc_offset_seconds, server_epoch_to_utc
+from engine.plugins.brokers.mt5_time import ServerClock
 
 # connect() and _verify_server() both log through this; it was referenced on two
 # lines but never defined, so connect() raised NameError at the "attached:
@@ -84,7 +84,7 @@ class MT5BrokerAdapter(BrokerAdapter):
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._server_utc_offset_seconds: float = 0.0
+        self._clock = ServerClock()
         # The account this adapter is bound to. Set from MT5_LOGIN when one is
         # configured; otherwise captured from the terminal on the FIRST connect
         # and never rewritten - see _bind_account().
@@ -120,9 +120,11 @@ class MT5BrokerAdapter(BrokerAdapter):
         self._bind_account(info.login)
 
         # MT5 timestamps are in the broker's server time, not UTC (confirmed:
-        # ~3h offset on this account) - measured fresh on every (re)connect so
-        # DST transitions don't need a code change.
-        self._server_utc_offset_seconds = measure_server_utc_offset_seconds()
+        # ~3h offset on this account) - re-measured on every (re)connect so DST
+        # transitions don't need a code change. Best effort: connecting while
+        # the market is shut is normal, and the clock measures itself later
+        # rather than blocking the connection or adopting a wrong value.
+        self._clock.refresh(force=True)
 
     def _verify_server(self, actual_server: str, terminal_path: str) -> None:
         """Refuse to run against the wrong broker server.
@@ -190,7 +192,12 @@ class MT5BrokerAdapter(BrokerAdapter):
         return int(self._settings.mt5_login)
 
     def _to_utc(self, epoch_seconds: float) -> datetime:
-        return server_epoch_to_utc(epoch_seconds, self._server_utc_offset_seconds)
+        # Raises ServerTimeUnavailable rather than returning a guessed time.
+        # That propagates out of get_account_state() and stops the cycle, which
+        # is the safe direction: _daily_stats() feeds the daily-loss and
+        # consecutive-loss circuit breakers, and a mis-stamped deal puts the
+        # wrong day's trades behind them.
+        return self._clock.to_utc(epoch_seconds)
 
     def disconnect(self) -> None:
         mt5.shutdown()

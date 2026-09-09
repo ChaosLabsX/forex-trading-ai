@@ -5,6 +5,15 @@ from abc import ABC, abstractmethod
 from engine.core.models import Candle, Tick, Timeframe
 
 
+class MarketDataUnavailable(RuntimeError):
+    """The provider cannot serve ANY symbol right now.
+
+    Distinct from SymbolUnavailableError, which is one symbol's problem: this
+    means the cycle is pointless, so a caller should stop rather than fail once
+    per symbol and bury the reason under N identical tracebacks.
+    """
+
+
 class SymbolUnavailableError(RuntimeError):
     """This account's server has no such symbol.
 
