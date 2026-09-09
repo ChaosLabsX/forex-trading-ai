@@ -156,7 +156,17 @@ Stop-ScheduledTask -TaskName "ForexAI-Engine";      Start-ScheduledTask -TaskNam
 Stop-ScheduledTask -TaskName "ForexAI-Engine-Live"; Start-ScheduledTask -TaskName "ForexAI-Engine-Live"
 
 Get-Content C:\ForexAI\logs\engine-icmarkets-live.log -Tail 25 -Wait
+
+# alive? armed? actually evaluating? - and if nothing traded, why not
+.venv\Scripts\python.exe scripts\check_engine_health.py
 ```
+
+`scripts/check_engine_health.py` is the first thing to run when an account
+looks idle. "No trades" is ambiguous - a blocked strategy and a working one
+that found no setup both produce silence - so it reads the `signals` table,
+which records every evaluation *and its reason*, fired or not. It also prints
+the live gate through the engine's own `StrategyGate`, and takes guard 1 from
+the heartbeat rather than a config file, because only the running process knows.
 
 `infra/restart-live-engine.ps1` does the live restart and *verifies* it - waits
 for the old engine to exit, for a new pid, and for this restart's `attached:`

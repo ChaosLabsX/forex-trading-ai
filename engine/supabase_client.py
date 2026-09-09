@@ -40,16 +40,40 @@ class SupabaseClient:
         query = urllib.parse.urlencode(filters)
         return self._request("GET", f"/{table}?{query}", None) or []
 
+    def count(self, table: str, filters: dict[str, str]) -> int:
+        """Exact row count, without transferring the rows.
+
+        Not len(select(...)): PostgREST caps a select at its configured maximum
+        (1000 by default), so counting rows client-side silently under-reports
+        the moment a table outgrows one page - and reports a suspiciously round
+        number while doing it. The server counts instead; Range keeps the body
+        to a single row.
+        """
+        query = urllib.parse.urlencode(filters)
+        request = urllib.request.Request(
+            f"{self._base}/{table}?{query}",
+            method="GET",
+            headers={**self._headers(), "Prefer": "count=exact", "Range": "0-0"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return int(response.headers["Content-Range"].split("/")[-1])
+        except urllib.error.HTTPError as exc:
+            raise SupabaseError(f"COUNT {table} failed: {exc.code} {exc.read().decode()}") from exc
+
     def update(self, table: str, filters: dict[str, str], patch: dict) -> None:
         query = urllib.parse.urlencode(filters)
         self._request("PATCH", f"/{table}?{query}", patch)
 
-    def _request(self, method: str, path: str, body, extra_headers: dict | None = None):
-        headers = {
+    def _headers(self) -> dict[str, str]:
+        return {
             "apikey": self._key,
             "Authorization": f"Bearer {self._key}",
             "Content-Type": "application/json",
         }
+
+    def _request(self, method: str, path: str, body, extra_headers: dict | None = None):
+        headers = self._headers()
         headers.update(extra_headers or {})
         data = json.dumps(body).encode() if body is not None else None
         request = urllib.request.Request(self._base + path, data=data, method=method, headers=headers)
