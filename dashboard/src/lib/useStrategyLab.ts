@@ -222,6 +222,33 @@ export function latestEvaluation(
   );
 }
 
+/** Whether a strategy can place real orders on the live account, and on whose
+ * authority. Mirrors engine/gating.py:_compute - the ENGINE is the authority
+ * here; this exists so the UI reads the same inputs instead of restating the
+ * rule from memory.
+ *
+ * Guard 4 is satisfied by a READY verdict OR an explicit live_override, and
+ * omitting the second half is not a cosmetic slip: it makes the dashboard
+ * report that no real order can be placed while one is being sized. */
+export type LiveState = "off" | "blocked" | "armed" | "override";
+
+export function liveState(strategy: Strategy, link: StrategyAccount | null): LiveState {
+  if (link === null || !link.enabled) return "off";
+  if (strategy.retired) return "blocked";
+  if (strategy.readiness === "ready") return "armed";
+  return link.live_override ? "override" : "blocked";
+}
+
+/** "on (override)" rather than a bare "on": the distinction between a strategy
+ * that earned its place and one a human decided to run unproven is the whole
+ * point of live_override, and the label is where it is read most often. */
+export const LIVE_STATE_LABEL: Record<LiveState, string> = {
+  off: "off",
+  blocked: "on (blocked)",
+  armed: "on",
+  override: "on (override)",
+};
+
 export function linkFor(
   links: StrategyAccount[],
   strategyName: string,

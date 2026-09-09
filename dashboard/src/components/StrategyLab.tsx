@@ -1,9 +1,11 @@
 import { Fragment, useState } from "react";
 import type { Account, Readiness, Strategy, StrategyAccount, StrategyEvaluation, Trade } from "../types";
 import {
+  LIVE_STATE_LABEL,
   fmtEta,
   latestEvaluation,
   linkFor,
+  liveState,
   rankStrategies,
   setStrategyEnabled,
   verdictEta,
@@ -53,6 +55,16 @@ export function StrategyLab({ accounts, strategies, links, evaluations, closedTr
     setBusy(null);
   }
 
+  // What the ENGINE would actually let trade, by its own rule - not "is
+  // anything READY". A strategy on live_override trades without a READY
+  // verdict, so counting verdicts alone said the opposite of the truth.
+  const liveArmed = liveAccount
+    ? active
+        .map((s) => ({ strategy: s, state: liveState(s, linkFor(links, s.name, liveAccount.key)) }))
+        .filter((r) => r.state === "armed" || r.state === "override")
+    : [];
+  const liveOverrides = liveArmed.filter((r) => r.state === "override");
+
   const readyCount = active.filter((s) => s.readiness === "ready").length;
   const almostCount = active.filter((s) => s.readiness === "almost_ready").length;
   const notReadyCount = active.filter((s) => s.readiness === "not_ready").length;
@@ -83,11 +95,27 @@ export function StrategyLab({ accounts, strategies, links, evaluations, closedTr
         </div>
       </div>
 
-      {liveAccount && readyCount === 0 && (
+      {liveAccount && liveArmed.length > 0 && (
+        <div className="banner banner-live" role="status">
+          <div className="banner-text">
+            <strong>The live account is armed.</strong>{" "}
+            {liveArmed.map((r) => fmtStrategyName(r.strategy.name)).join(", ")} can place real
+            orders on {liveAccount.label}.
+            {liveOverrides.length > 0 && (
+              <div className="banner-note">
+                {liveOverrides.length === 1 ? "It runs" : "They run"} on live_override — a
+                deliberate decision to trade without a READY verdict, not an earned one.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {liveAccount && liveArmed.length === 0 && (
         <div className="banner banner-info" role="status">
           <div className="banner-text">
-            <strong>No strategy is Ready, so the live account would place no trades.</strong> That
-            is by design — live never falls back to unproven strategies.
+            <strong>No strategy is eligible on the live account, so it would place no trades.</strong>{" "}
+            Live requires a READY verdict, or an explicit override.
           </div>
         </div>
       )}
@@ -201,13 +229,7 @@ export function StrategyLab({ accounts, strategies, links, evaluations, closedTr
                             disabled={busy === liveLink.id}
                             onChange={(e) => toggle(liveLink.id, e.target.checked)}
                           />
-                          <span>
-                            {liveLink.enabled
-                              ? strategy.readiness === "ready"
-                                ? "on"
-                                : "on (blocked)"
-                              : "off"}
-                          </span>
+                          <span>{LIVE_STATE_LABEL[liveState(strategy, liveLink)]}</span>
                         </label>
                       ) : (
                         "—"

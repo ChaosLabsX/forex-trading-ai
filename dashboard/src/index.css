@@ -545,6 +545,14 @@ body {
   border: 1px solid var(--accent);
 }
 
+/* Armed, not paused: the live account can place real orders right now. Warn
+   tint rather than critical - this is an intended state, but never a quiet
+   one. */
+.banner-live {
+  background: var(--warn-tint);
+  border: 1px solid var(--warn);
+}
+
 .banner-crit {
   background: var(--crit-tint);
   border: 1px solid var(--crit);
