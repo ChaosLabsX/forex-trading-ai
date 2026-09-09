@@ -10,8 +10,8 @@ Four things it reads, in the order they can fail:
   1. HEARTBEAT - is the process alive, is the broker attached, and is guard 1
      (LIVE_TRADING_ENABLED) on?
   2. CLOCKS - is each engine stamping bars with the right time? The quietest
-     failure here: a stale-tick measurement of the broker's UTC offset moved
-     the demo lab's bars 18 hours and nothing errored for three days.
+     failure here: a stale-tick measurement of the broker's UTC offset put the
+     demo lab's bars 31 hours ahead, and nothing errored for three days.
   3. GATE - guards 2/3/4, through the engine's own StrategyGate, so this can
      never drift from what the engine will actually do.
   4. ACTIVITY - the signals table stores a row for EVERY evaluation, fired or
@@ -169,8 +169,10 @@ def clocks(supabase: SupabaseClient, accounts: list[dict]) -> None:
         if lag == 1:
             print(f"   {account['key']:18} OK - bars stamped correctly")
         else:
-            print(f"   {account['key']:18} DRIFTED {(lag - 1) % 24}h - this engine is judging the "
-                  f"wrong bars. Restart it while the market is OPEN.")
+            # (1 - lag) mod 24 is how far AHEAD the bars are stamped, which is
+            # what a reader can check against a chart. The raw lag is not.
+            print(f"   {account['key']:18} DRIFTED - bars stamped {(1 - lag) % 24}h ahead of "
+                  f"where they belong. Restart this engine while the market is OPEN.")
     print()
 
 

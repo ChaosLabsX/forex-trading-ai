@@ -327,8 +327,9 @@ was ever claimed.
   timestamp in the broker's server time, and the engine measured the UTC offset
   as `last tick - now`. That is only the offset if the tick is *current*. The
   demo engine restarted on Sunday 2026-09-06, measured against a 31-hour-old
-  tick, and spent three days stamping bars ~18 hours into the future - which
-  moved `london_breakout_v1`'s 07:00-11:00 UTC window to 01:00-05:00, so the lab
+  tick, and spent three days stamping bars **31 hours** into the future - 7
+  hours once reduced mod 24, which moved `london_breakout_v1`'s 07:00-11:00 UTC
+  window to **00:00-04:00**, so the lab
   traded the *Asian session* while labelling it the London open. It also wrote
   future-dated rows into `candles`. Nothing errored; every log line looked
   ordinary. Found only by pairing the live engine's evaluations against the
