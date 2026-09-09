@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 
 import MetaTrader5 as mt5
@@ -190,6 +191,18 @@ class MT5BrokerAdapter(BrokerAdapter):
         if not self._settings.mt5_login:
             return None
         return int(self._settings.mt5_login)
+
+    def server_now(self) -> datetime | None:
+        """The broker's wall clock right now, naive, or None if unmeasured.
+
+        offset_if_known() rather than offset(): a time-of-day rule that cannot
+        be evaluated should be skipped, not turned into an exception that stops
+        the engine.
+        """
+        offset = self._clock.offset_if_known()
+        if offset is None:
+            return None
+        return datetime.fromtimestamp(time.time() + offset, tz=timezone.utc).replace(tzinfo=None)
 
     def _to_utc(self, epoch_seconds: float) -> datetime:
         # Raises ServerTimeUnavailable rather than returning a guessed time.

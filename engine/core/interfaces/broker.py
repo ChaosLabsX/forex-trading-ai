@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from datetime import datetime
 
 from engine.core.models import AccountState, ClosedTradePnl, Direction, Position
 
@@ -62,6 +63,18 @@ class BrokerAdapter(ABC):
         """Margin the broker would require for this order, or None if it can't
         be calculated. Used to refuse trades that would over-commit the account."""
         ...
+
+    def server_now(self) -> datetime | None:
+        """The broker's own wall clock, or None if it is not known.
+
+        Needed for time-of-day rules that are really day-boundary rules: the
+        daily rollover is 00:00 SERVER time, which sits at a different UTC hour
+        in summer than in winter.
+
+        Concrete, not abstract: an adapter that cannot answer returns None and
+        callers skip the rule rather than guess at it.
+        """
+        return None
 
     @abstractmethod
     def get_price_value_per_lot(self, symbol: str) -> float | None:

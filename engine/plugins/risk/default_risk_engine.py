@@ -13,6 +13,11 @@ logger = logging.getLogger("engine.risk")
 MAX_CONSECUTIVE_STOP_LOSSES = 3
 MAX_DAILY_LOSS_PCT = 3.0
 
+# Minutes either side of the broker's midnight to refuse entries in. The
+# strategies evaluate once per closed bar, so in practice this catches the
+# 00:00-00:01 server evaluation - the one that fills into the rollover.
+ROLLOVER_BLACKOUT_MINUTES = 10
+
 
 class DefaultRiskEngine(RiskEngine):
     """Safety rails plus sizing.
@@ -53,6 +58,33 @@ class DefaultRiskEngine(RiskEngine):
         open_count = sum(1 for p in open_positions if p.status == PositionStatus.OPEN)
         if open_count >= cap:
             return RiskDecision(approved=False, reason=f"max concurrent trades reached ({cap})")
+
+        # DAILY ROLLOVER. At the broker's day boundary liquidity is withdrawn
+        # and spreads widen enormously for a few minutes. Measured on this
+        # account's own fills, entries there gave up a median +0.709R of the
+        # intended risk against +0.015R in every other hour - 47x - which
+        # destroys any edge these strategies have before the trade begins.
+        #
+        # Read from the BROKER's clock, not a fixed UTC hour: rollover is 00:00
+        # server time, so it sits at 21:00 UTC while the server is UTC+3 and an
+        # hour later once DST ends. A hardcoded hour would be right for half the
+        # year and silently wrong for the other half.
+        #
+        # Unlike the loss breakers below, this DOES apply on the demo lab, and
+        # must. It is an execution-cost rule rather than a capital-protection
+        # one, so exempting the lab would have it measure a strategy nobody can
+        # actually trade. It censors nothing either: the criterion is the clock,
+        # known before the outcome, so it cannot bias measured expectancy the
+        # way blocking during losing streaks would.
+        server_now = broker.server_now()
+        if server_now is not None:
+            minutes = server_now.hour * 60 + server_now.minute
+            if min(minutes, 24 * 60 - minutes) <= ROLLOVER_BLACKOUT_MINUTES:
+                return RiskDecision(
+                    approved=False,
+                    reason=f"daily rollover blackout ({server_now:%H:%M} server time) - "
+                           "spreads widen here and entries cost ~0.7R",
+                )
 
         # LOSS circuit breakers - live only. They protect real capital, so they
         # run only when live trading is actually enabled. On the demo lab they

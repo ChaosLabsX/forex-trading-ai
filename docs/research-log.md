@@ -323,6 +323,42 @@ was ever claimed.
   *marginal*, only the high-volatility trades survive to be recorded - selection
   on a variable plausibly correlated with outcome, which is a real bias, not
   merely a smaller sample.
+- **Execution cost is paid at ENTRY too, and the stop-out method cannot see it.**
+  The realised-cost table above measures what a stop-out gives up beyond
+  -1.000R. That captures the exit only. Comparing each fill against the price
+  its own signal asked for (`signals.entry_price` vs `trades.entry_price`,
+  scaled by intended risk) measures the entry, and the two disagree sharply:
+
+  | Symbol | Entry slippage (median) | Stop-out cost | 
+  |---|---|---|
+  | XPDUSD | **+0.358R** | - |
+  | XPTUSD | **+0.189R** | - |
+  | MidDE50 | +0.128R | - |
+  | IT40 | +0.074R | - |
+  | FX majors | +0.000 to +0.023R | - |
+
+  `donchian_trending_v1` was recorded above as having *the lowest* realised cost
+  in the lab (+0.013R) and the note concluded "cheap execution did not save it".
+  The premise was wrong: its execution was the most expensive, at a median
+  +0.066R and mean +0.104R given up before the trade even started, on
+  instruments where the entry alone can cost a third of the risk budget. The
+  retirement verdict is unchanged - -0.324R with a CI entirely below zero is not
+  rescued by any cost story - but **the cost table understates wide-stop
+  instruments, and any future test on them must measure entry slippage too.**
+  Fill latency is not the cause: median 0.4s from signal row to open position.
+
+- **The broker's daily rollover is the single most expensive minute to trade.**
+  Grouping every fill by the UTC hour of its signal, entries in the 21:00 block
+  (00:00-00:01 *server* time, the day boundary) gave up a median **+0.709R** of
+  intended risk, against **+0.015R** in every other hour - a 47x difference,
+  n=5. Realised P&L over those five is noise and is not the argument; the cost
+  is mechanical and certain, and it exceeds every edge in this log.
+  **Fixed** in `DefaultRiskEngine`: entries are refused within 10 minutes of the
+  broker's midnight, read from the broker's own clock rather than a fixed UTC
+  hour, because rollover moves with DST. It applies to the demo lab as well as
+  live - it is an execution-cost rule, not capital protection, and the criterion
+  is the clock rather than the outcome, so it censors nothing.
+
 - **A wrong clock is the quietest way to invalidate a result.** MT5 reports every
   timestamp in the broker's server time, and the engine measured the UTC offset
   as `last tick - now`. That is only the offset if the tick is *current*. The
