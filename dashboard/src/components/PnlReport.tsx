@@ -11,6 +11,7 @@ import {
   type PeriodMode,
 } from "../lib/usePnlReport";
 import { fmtMoney } from "../lib/format";
+import { PositionLog } from "./PositionLog";
 
 const MODES: Array<[PeriodMode, string]> = [
   ["month", "Month"],
@@ -110,6 +111,7 @@ export function PnlReport({ account, trades, loading, openCount }: Props) {
   }
 
   const tone = summary.net > 0 ? "pnl-pos" : summary.net < 0 ? "pnl-neg" : "";
+  const periodKey = `${period.mode}:${period.anchor.getTime()}:${period.from}:${period.to}`;
 
   return (
     <section className="pnl" aria-label={`Profit and loss, ${account.label}`}>
@@ -250,6 +252,11 @@ export function PnlReport({ account, trades, loading, openCount }: Props) {
             {summary.unknownPnl > 0 &&
               ` ${summary.unknownPnl} trade${summary.unknownPnl === 1 ? "" : "s"} closed without a result from MT5 and ${summary.unknownPnl === 1 ? "is" : "are"} excluded.`}
           </p>
+
+          {/* Keyed on the period so the "show more" count resets when you change
+              it - otherwise stepping from a busy month to a quiet one leaves a
+              stale "10 of 3" in the header. */}
+          <PositionLog key={periodKey} trades={inRange} />
         </>
       )}
     </section>

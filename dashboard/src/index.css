@@ -446,6 +446,41 @@ body {
   margin: 12px 0 0;
 }
 
+/* Per-position log inside the P&L panel. A rule above it, not a card around
+   it: it belongs to the summary it details rather than standing alone. */
+.pnl-log {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hairline);
+}
+
+.pnl-log-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.pnl-log-head-sub {
+  margin-top: 22px;
+}
+
+.pnl-log-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+}
+
+.pnl-log-count {
+  font-size: 12.5px;
+  color: var(--ink-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 .pnl-empty {
   color: var(--ink-muted);
   font-size: 14px;
