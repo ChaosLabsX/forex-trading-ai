@@ -116,7 +116,20 @@ function Should-Alert($entry) {
 function Save-State {
     # ConvertTo-Json unwraps single-element pipelines; force an array so a
     # one-account state file round-trips.
-    ConvertTo-Json @($state.Values) -Depth 3 | Set-Content -Path $StateFile -Encoding utf8
+    #
+    # Call this IMMEDIATELY after every transition, never only at the end of the
+    # run. State that exists solely in memory is lost by anything that throws
+    # later, and losing "we already said it came back" makes the recovery alert
+    # repeat on the next run, and the next, forever.
+    #
+    # Non-throwing on purpose: a transient file lock must not kill a watchdog
+    # run, but it MUST be visible, because the symptom otherwise is repeated
+    # alerts with no explanation in the log.
+    try {
+        ConvertTo-Json @($state.Values) -Depth 3 | Set-Content -Path $StateFile -Encoding utf8
+    } catch {
+        Write-Log "ERROR cannot write $StateFile - alerts will repeat until this clears: $($_.Exception.Message)"
+    }
 }
 
 # --- can we see Supabase at all? Blind is an alert, not an all-clear ---------
@@ -137,15 +150,39 @@ if ($blind.down) {
     Send-Alert "$E_OK WATCHDOG OK`nSupabase reachable again"
     $blind.down = $false
     $blind.lastAlertUtc = ""
+    # Persist the recovery HERE. It used to be saved only at the very end of the
+    # run, behind the account loop - so a Supabase wobble that failed one
+    # heartbeat query threw past the save, left down=true on disk, and made this
+    # same all-clear fire again five minutes later. Indefinitely.
+    Save-State
 }
 
 # --- the actual check: one latest heartbeat per enabled account --------------
 foreach ($account in $accounts) {
     $key = $account.key
     $entry = Get-Entry $key
-    $beats = @(Invoke-RestMethod `
-        -Uri "$base/rest/v1/engine_heartbeats?account_key=eq.$key&select=created_at,status&order=created_at.desc&limit=1" `
-        -Headers $headers)
+    # Wrapped, and `continue` rather than abort: with ErrorActionPreference=Stop
+    # an unguarded failure here killed the WHOLE run. That did two bad things at
+    # once - it discarded any state change made above, and it skipped every
+    # remaining account, so the watchdog quietly stopped watching exactly when
+    # Supabase was flaky enough to be worth watching.
+    try {
+        $beats = @(Invoke-RestMethod `
+            -Uri "$base/rest/v1/engine_heartbeats?account_key=eq.$key&select=created_at,status&order=created_at.desc&limit=1" `
+            -Headers $headers)
+    } catch {
+        # We cannot tell whether this engine is alive. Staying quiet would be the
+        # watchdog failing at its one job, so alert under the same rate limit as
+        # a silent engine.
+        if (Should-Alert $entry) {
+            Send-Alert "$E_ALARM WATCHDOG BLIND  $SEP  $($key.ToUpper())`ncannot read heartbeats - engine state unknown`n$($_.Exception.Message)"
+            $entry.down = $true
+            $entry.lastAlertUtc = [DateTimeOffset]::UtcNow.ToString("o")
+            Save-State
+        }
+        Write-Log "ERROR heartbeat query failed for ${key}: $($_.Exception.Message)"
+        continue
+    }
 
     if ($beats.Count -eq 0) {
         $stale = $true
@@ -161,11 +198,15 @@ foreach ($account in $accounts) {
             Send-Alert "$E_ALARM ENGINE SILENT  $SEP  $($key.ToUpper())`nno heartbeat for $ageText (threshold ${StaleMinutes}m)`ncheck the VPS: task state, Get-Process python, MT5 login"
             $entry.down = $true
             $entry.lastAlertUtc = [DateTimeOffset]::UtcNow.ToString("o")
+            Save-State
         }
         Write-Log "SILENT $key age=$ageText"
     } else {
         if ($entry.down) {
             Send-Alert "$E_OK ENGINE BACK  $SEP  $($key.ToUpper())`nheartbeat resumed ($ageText ago)"
+            $entry.down = $false
+            $entry.lastAlertUtc = ""
+            Save-State
         }
         $entry.down = $false
         $entry.lastAlertUtc = ""
