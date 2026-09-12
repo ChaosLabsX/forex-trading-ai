@@ -163,6 +163,39 @@ deal's own corrected UTC time instead.
 through `server_epoch_to_utc()` - never `datetime.fromtimestamp(x, tz=timezone.utc)`
 on a raw MT5 value.**
 
+### When the offset cannot be measured at all
+
+Measuring needs a *live* tick, so an engine started while the market is closed
+has no offset and `ServerClock.offset()` raises `ServerTimeUnavailable` rather
+than guess. (A mid-session loss of EURUSD does not raise - the last good offset
+is kept, and an offset cannot change while the market is shut. So this is
+precisely the weekend-restart case, and it clears itself at the open.)
+
+Refusing is right. Doing it loudly is not: `MarketDataUnavailable` reaching a
+generic `except Exception` becomes a full traceback *per cycle*. On 2026-09-12
+that was 60 an hour from the evaluation path and **720 an hour** from stop
+management, which runs every 5 seconds.
+
+The invariant: **every per-cycle broker call must handle
+`MarketDataUnavailable`**, because any of them can reach `_to_utc()`. Three run
+on a timer - the account/candle refresh, `_manage_open_positions`, and
+`_emergency_close_all`. They report through `_note_block()`, which says it once
+per outage and again if the reason changes.
+
+The subtle part, and the reason the first fix missed a path: whether a path
+fires depends on **account state, not on the bug**. `get_open_positions()` only
+touches the clock if positions exist, so the demo lab drowned in tracebacks
+while the live engine - flat at the time, same code, same weekend - looked
+perfectly healthy. A path can be broken for months and invisible.
+
+```powershell
+.venv\Scripts\python.exe scripts\test_clock_outage.py
+```
+
+Drives all three paths with a clock that never measures and asserts on the log:
+no tracebacks, one line per outage, and it still speaks when the reason changes.
+Run it after touching anything that reads a broker timestamp.
+
 ## A client-side order error doesn't mean the order failed
 
 Also found live: `place_order()` raised `MT5ConnectionError` with MT5 retcode

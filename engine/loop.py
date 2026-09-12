@@ -469,6 +469,14 @@ class EngineLoop:
         Shared by the broker and market-data paths because they stall on the
         same thing - an unmeasurable broker clock - and two independent
         once-only flags would each announce it, which is twice.
+
+        The invariant, learned the hard way: EVERY per-cycle broker call must
+        handle MarketDataUnavailable, because any of them can reach _to_utc().
+        The three that run on a timer are the account/candle refresh, stop
+        management (every 5s), and emergency close-all. Fixing only the first
+        left the second flooding the demo lab at 720 tracebacks an hour. The
+        rest (_open_trade, _find_orphaned_position) are reachable only while a
+        trade is being placed, which this state already prevents.
         """
         if self._market_data_block != str(exc):
             self._market_data_block = str(exc)
@@ -575,7 +583,22 @@ class EngineLoop:
         broker = self._engine.broker
         if broker is None:
             return
-        positions = broker.get_open_positions()
+        try:
+            positions = broker.get_open_positions()
+        except MarketDataUnavailable as exc:
+            # This is the button someone presses when they want OUT, so it owes
+            # them a plain answer rather than a traceback in a log they are not
+            # reading. It can only fail this way before the market has ticked
+            # once since startup - when no position could be closed anyway -
+            # but "nothing happened" must never be something they have to infer.
+            logger.error("EMERGENCY CLOSE ALL could not read positions: %s", exc)
+            _notify_all(
+                self._engine,
+                "emergency_close",
+                f"Emergency close-all did NOT run - {exc} Nothing was closed. "
+                "The market is not trading, so no position can be closed until it reopens.",
+            )
+            return
         logger.warning("EMERGENCY CLOSE ALL: closing %d open position(s)", len(positions))
         _notify_all(
             self._engine, "emergency_close", f"Emergency close-all triggered: closing {len(positions)} position(s)."
@@ -598,6 +621,19 @@ class EngineLoop:
 
         try:
             positions = broker.get_open_positions()
+        except MarketDataUnavailable as exc:
+            # The same unmeasurable clock as the evaluation path, reached by a
+            # different road: _to_position() stamps opened_at with the broker's
+            # offset, so merely READING positions fails on a market that has not
+            # ticked since this process started.
+            #
+            # This runs every 5 seconds, and only on an account that actually
+            # holds positions - which is why the demo lab drowned in tracebacks
+            # over the 2026-09-12 weekend while the live engine, flat at the
+            # time, looked clean. Standing down costs nothing: stops only need
+            # managing when prices move, and prices are not moving.
+            self._note_block("stop management", exc)
+            return
         except Exception:
             logger.exception("failed to fetch open positions for stop management")
             return
