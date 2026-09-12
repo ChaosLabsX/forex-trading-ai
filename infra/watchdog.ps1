@@ -39,7 +39,10 @@ param(
     [string]$StateFile = "C:\ForexAI\logs\watchdog-state.json",
     [string]$LogFile = "C:\ForexAI\logs\watchdog.log",
     [int]$StaleMinutes = 5,                                   # engine beats every 60s; 5 missed beats = silent
-    [int]$RealertMinutes = 60
+    [int]$RealertMinutes = 60,
+    [int]$HttpAttempts = 3,                                   # a 504 is the gateway's problem, not the engine's
+    [int]$HttpTimeoutSec = 20,
+    [int]$HttpRetryDelaySec = 4
 )
 
 $ErrorActionPreference = "Stop"
@@ -70,6 +73,57 @@ foreach ($k in 'SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'TELEGRAM_BOT_TOKEN'
 }
 $headers = @{ apikey = $cfg['SUPABASE_SERVICE_ROLE_KEY']; Authorization = "Bearer $($cfg['SUPABASE_SERVICE_ROLE_KEY'])" }
 $base = $cfg['SUPABASE_URL'].TrimEnd('/')
+
+function Get-Rows([string]$uri) {
+    <#
+    One PostgREST query -> a FLAT array of rows, retried past transient failures.
+
+    Both halves of that matter, and the plain `@(Invoke-RestMethod ...)` this
+    replaces got both wrong.
+
+    Flat: PS 5.1 emits a JSON array as a SINGLE Object[] down the pipeline, so
+    @() wraps it rather than flattening it - Count 1, holding both rows. With
+    two enabled accounts the per-account loop therefore ran ONCE, with $account
+    bound to both rows at once; $account.key member-enumerated to an ARRAY of
+    keys. That is why one alert read "ICMARKETS-DEMO ICMARKETS-LIVE", and why
+    the heartbeat query asked for an account literally named
+    "icmarkets-demo icmarkets-live". No such account exists, so Supabase
+    returned [] - which the same quirk turned into a 1-element array holding an
+    empty Object[], so the Count -eq 0 guard missed it and the run died on
+    [DateTimeOffset]::Parse($null). Under ErrorActionPreference=Stop that killed
+    the whole run, every run, silently: since the live account was added this
+    watchdog checked NEITHER engine. It was watching nothing while looking fine.
+
+    Piping through ForEach-Object enumerates properly, and an empty result
+    becomes a real zero-length array.
+
+    Retried: a 504 from the API gateway is evidence about Supabase, not about
+    the engine. Alerting on the first one produces alarms that do not mean what
+    they say, and an alarm that cries wolf is worse than no alarm - it trains
+    you to ignore the one that matters.
+    #>
+    for ($attempt = 1; $attempt -le $HttpAttempts; $attempt++) {
+        try {
+            $raw = Invoke-RestMethod -Uri $uri -Headers $headers -TimeoutSec $HttpTimeoutSec
+            # The leading comma is load-bearing, and is the mirror image of the
+            # bug above. A PowerShell function UNROLLS an array as it returns,
+            # so a plain `return @(...)` on a one-row result hands the caller a
+            # bare PSCustomObject - which has no .Count in PS 5.1, so a fresh
+            # heartbeat reads as no heartbeat at all. `,` wraps it so the array
+            # survives the return whole, for 0, 1 or many rows alike.
+            #
+            # Callers therefore assign it directly. Do NOT write
+            # `@(Get-Rows ...)`: that re-creates the nesting this function
+            # exists to prevent.
+            if ($null -eq $raw) { return , @() }
+            return , @($raw | ForEach-Object { $_ })
+        } catch {
+            if ($attempt -ge $HttpAttempts) { throw }
+            Write-Log "RETRY $attempt/$HttpAttempts $($_.Exception.Message)"
+            Start-Sleep -Seconds ($attempt * $HttpRetryDelaySec)
+        }
+    }
+}
 
 function Send-Alert([string]$text) {
     if ($DryRun) { Write-Log ("DRYRUN would send: " + ($text -replace "`n", " / ")); return }
@@ -135,7 +189,7 @@ function Save-State {
 # --- can we see Supabase at all? Blind is an alert, not an all-clear ---------
 $blind = Get-Entry "__supabase__"
 try {
-    $accounts = @(Invoke-RestMethod -Uri "$base/rest/v1/accounts?enabled=eq.true&select=key" -Headers $headers)
+    $accounts = Get-Rows "$base/rest/v1/accounts?enabled=eq.true&select=key"
 } catch {
     if (Should-Alert $blind) {
         Send-Alert "$E_ALARM WATCHDOG BLIND`ncannot reach Supabase - engine state unknown`n$($_.Exception.Message)"
@@ -158,8 +212,10 @@ if ($blind.down) {
 }
 
 # --- the actual check: one latest heartbeat per enabled account --------------
+Write-Log ("watching {0} account(s): {1}" -f $accounts.Count, (($accounts | ForEach-Object { $_.key }) -join ", "))
 foreach ($account in $accounts) {
-    $key = $account.key
+    $key = [string]$account.key
+    if (-not $key) { Write-Log "WARN account row without a key - skipped"; continue }
     $entry = Get-Entry $key
     # Wrapped, and `continue` rather than abort: with ErrorActionPreference=Stop
     # an unguarded failure here killed the WHOLE run. That did two bad things at
@@ -167,9 +223,7 @@ foreach ($account in $accounts) {
     # remaining account, so the watchdog quietly stopped watching exactly when
     # Supabase was flaky enough to be worth watching.
     try {
-        $beats = @(Invoke-RestMethod `
-            -Uri "$base/rest/v1/engine_heartbeats?account_key=eq.$key&select=created_at,status&order=created_at.desc&limit=1" `
-            -Headers $headers)
+        $beats = Get-Rows "$base/rest/v1/engine_heartbeats?account_key=eq.$key&select=created_at,status&order=created_at.desc&limit=1"
     } catch {
         # We cannot tell whether this engine is alive. Staying quiet would be the
         # watchdog failing at its one job, so alert under the same rate limit as
@@ -184,11 +238,21 @@ foreach ($account in $accounts) {
         continue
     }
 
-    if ($beats.Count -eq 0) {
+    # TryParse, not Parse. Parse on an absent timestamp throws, and under
+    # ErrorActionPreference=Stop a throw here ends the ENTIRE run - so one
+    # unreadable row stopped the watchdog checking every remaining account and
+    # discarded the state it had already changed. "Cannot read the time" is a
+    # reason to treat the engine as silent, never a reason to stop watching.
+    $beatTime = [DateTimeOffset]::MinValue
+    $readable = $false
+    if ($beats.Count -gt 0 -and $beats[0].PSObject.Properties['created_at']) {
+        $readable = [DateTimeOffset]::TryParse([string]$beats[0].created_at, [ref]$beatTime)
+    }
+    if (-not $readable) {
         $stale = $true
-        $ageText = "never (no heartbeat ever recorded)"
+        $ageText = "never (no readable heartbeat)"
     } else {
-        $age = [DateTimeOffset]::UtcNow - [DateTimeOffset]::Parse($beats[0].created_at)
+        $age = [DateTimeOffset]::UtcNow - $beatTime
         $stale = $age.TotalMinutes -gt $StaleMinutes
         $ageText = "{0}m" -f [math]::Round($age.TotalMinutes)
     }

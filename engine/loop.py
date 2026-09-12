@@ -384,6 +384,20 @@ class EngineLoop:
                 open_positions = broker.get_open_positions()
                 self._reconcile_closed_trades(open_positions)
                 self._refresh_ownership()
+            except MarketDataUnavailable as exc:
+                # Over a closed weekend this is ServerTimeUnavailable, and it is
+                # the clock guard doing its job: _daily_stats() stamps deals with
+                # the broker's clock, which cannot be measured while EURUSD is
+                # not ticking, so it refuses rather than guesses.
+                #
+                # Refusing is right; a traceback is not. Nothing below can run
+                # without account state - and the candle fetch is about to fail
+                # on the same unmeasurable clock - so end the cycle here and say
+                # it once per state change. Unhandled, it was a full traceback
+                # every 60 seconds for the length of every weekend, which is how
+                # a real error goes unread.
+                self._note_block("account state", exc)
+                return
             except Exception:
                 logger.exception("failed to fetch account state/open positions")
 
@@ -431,9 +445,7 @@ class EngineLoop:
                     # instead of raising the same thing N times. Most often the
                     # broker's UTC offset is not measurable yet because the
                     # market is closed - normal, and self-healing at the open.
-                    if self._market_data_block != str(exc):
-                        self._market_data_block = str(exc)
-                        logger.warning("market data unavailable: %s", exc)
+                    self._note_block("market data", exc)
                     return
                 except SymbolUnavailableError as exc:
                     # Absent on this server, so the other timeframes cannot
@@ -450,6 +462,17 @@ class EngineLoop:
                 self._evaluate_strategies(
                     symbol, candles_by_timeframe, account_state, open_positions, upcoming_news
                 )
+
+    def _note_block(self, where: str, exc: Exception) -> None:
+        """Announce a provider-wide stall once per state change, not once per cycle.
+
+        Shared by the broker and market-data paths because they stall on the
+        same thing - an unmeasurable broker clock - and two independent
+        once-only flags would each announce it, which is twice.
+        """
+        if self._market_data_block != str(exc):
+            self._market_data_block = str(exc)
+            logger.warning("%s on hold: %s", where, exc)
 
     def _skip_unavailable(self, symbol: str, exc: Exception) -> None:
         """Retire a symbol this account's server does not have, loudly and once.

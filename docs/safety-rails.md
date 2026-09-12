@@ -281,6 +281,36 @@ Heartbeats are only sent while `self._connected`, so a broker that never
 connects reads as silence - which is correct, and is exactly what the section
 above would have surfaced in five minutes instead of days.
 
+### Who watches the watchdog: `scripts/test_watchdog.py`
+
+A broken watchdog produces the same silence as a healthy system, so it is the
+one component that cannot report its own failure. It has now done exactly that
+twice: a recovery saved only at the end of a run (so a mid-run throw lost it and
+the all-clear repeated forever), and `@(Invoke-RestMethod ...)`, which does not
+flatten in PowerShell 5.1 - with **two** enabled accounts the per-account loop
+ran once with `$account` bound to both rows, asked Supabase about an account
+named `icmarkets-demo icmarkets-live`, and died on the unparseable timestamp
+that came back. From the live account's first day until 2026-09-12 it therefore
+checked *neither* engine, and the only visible symptom was a single Telegram
+alert naming both accounts at once.
+
+Both bugs were invisible to reading and obvious to a stub, so there is now a
+stub. `scripts/test_watchdog.py` runs `watchdog.ps1` in `-DryRun` against a fake
+Supabase across four scenarios - healthy, one engine dead, a transient 504, a
+lasting outage - and asserts on the **alerts**, because alerts are the product.
+It needs no VPS, no MT5 and no secrets:
+
+```powershell
+.venv\Scripts\python.exe scripts\test_watchdog.py
+```
+
+Run it after touching `watchdog.ps1`. It fails on both historical bugs.
+
+Two general lessons, both PowerShell 5.1 and both now commented at the site:
+`@(...)` around a *command* wraps rather than flattens, and a function
+*unrolls* an array as it returns - so the fix for one is the cause of the other,
+and a one-row result silently becomes a bare object with no `.Count`.
+
 **Read this before installing the live terminal.** `MT5_TERMINAL_PATH` is also
 empty for the demo engine, so a bare `mt5.initialize()` attaches to whichever
 terminal Windows offers. `.env.live` pins `MT5_TERMINAL_PATH` for the
