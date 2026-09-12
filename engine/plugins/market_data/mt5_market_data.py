@@ -5,7 +5,7 @@ import MetaTrader5 as mt5
 from engine.config import Settings
 from engine.core.interfaces.market_data import MarketDataProvider, SymbolUnavailableError
 from engine.core.models import Candle, Tick, Timeframe
-from engine.plugins.brokers.mt5_time import ServerClock, server_epoch_to_utc
+from engine.plugins.brokers.mt5_time import ServerClock, clock_cache_path, server_epoch_to_utc
 
 _TIMEFRAME_MAP = {
     Timeframe.M1: mt5.TIMEFRAME_M1,
@@ -32,7 +32,7 @@ class MT5MarketDataProvider(MarketDataProvider):
         # broker adapter's mt5.initialize()), so the clock measures on first
         # use. ServerClock owns the caching, refreshing and refusal - see
         # mt5_time.py for why measuring this wrong is so quiet.
-        self._clock = ServerClock()
+        self._clock = ServerClock(cache_path=clock_cache_path(settings.account_key))
 
     def _offset(self) -> float:
         return self._clock.offset()

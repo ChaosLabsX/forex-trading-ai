@@ -25,3 +25,11 @@ Illustrator/
 # Machine-local and must never be committed: a pulled pid file would point the
 # restart script at a PID from a different machine.
 *.pid
+
+# The broker's measured UTC offset, remembered between restarts
+# (logs/clock-<account>.json, see engine/plugins/brokers/mt5_time.py).
+# Machine-local and must NEVER be committed: it is a measurement of one
+# terminal's connection to one trade server at one moment. A pulled copy would
+# be adopted as a starting offset on a machine that never took it - which is
+# the exact class of silent mis-timestamping the whole module exists to stop.
+logs/clock-*.json

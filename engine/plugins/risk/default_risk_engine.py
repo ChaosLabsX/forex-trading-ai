@@ -76,6 +76,28 @@ class DefaultRiskEngine(RiskEngine):
         # actually trade. It censors nothing either: the criterion is the clock,
         # known before the outcome, so it cannot bias measured expectancy the
         # way blocking during losing streaks would.
+        # CLOCK REMEMBERED, NOT MEASURED. The offset in use was read from disk
+        # at startup and no live tick has confirmed it - which means the
+        # reference symbol has not ticked since this process began, so the
+        # market is shut and this order would be rejected anyway (retcode
+        # 10018). Refusing here records a reason in `signals` instead of
+        # producing a failed-order alert.
+        #
+        # It also closes the only case where a cached offset can be wrong: a DST
+        # transition, which happens on a Sunday while the market is closed and
+        # the cache is exactly what is in use. Reading data on a remembered
+        # clock is fine; committing real money to one is not.
+        #
+        # Self-clearing, and checked BEFORE the rollover rule below because that
+        # rule reads the very clock in question: the first live tick confirms
+        # the offset within a minute of the open.
+        if broker.clock_is_provisional():
+            return RiskDecision(
+                approved=False,
+                reason="broker clock is remembered, not yet confirmed by a live tick "
+                       "(market closed?) - no entry until it is",
+            )
+
         server_now = broker.server_now()
         if server_now is not None:
             minutes = server_now.hour * 60 + server_now.minute

@@ -163,6 +163,46 @@ deal's own corrected UTC time instead.
 through `server_epoch_to_utc()` - never `datetime.fromtimestamp(x, tz=timezone.utc)`
 on a raw MT5 value.**
 
+### The offset is remembered between restarts
+
+Measuring needs a live tick, so an engine that restarts while the market is shut
+has nothing to measure from. Keeping the offset in memory only made the weekend
+behaviour depend on something arbitrary - **whether the engine happened to
+restart**. Observed on 2026-09-12: the demo lab ran normally straight through
+Friday's close on its in-memory offset, refreshing candles and evaluating
+strategies until 00:54 Saturday, then a restart left it blind and it stood down
+for the rest of the weekend. Same market, same code, two different engines.
+
+So `ServerClock` writes the offset to `logs/clock-<account>.json` and reads it
+back at startup. **Gitignored, and that matters**: the file is a measurement of
+one terminal's connection to one trade server at one moment, and a pulled copy
+would be adopted on a machine that never took it - the exact silent
+mis-timestamping the module exists to prevent.
+
+A value read from disk is **provisional**: good enough to timestamp data with,
+deliberately not good enough to open a position on. `DefaultRiskEngine` refuses
+entries while `broker.clock_is_provisional()`, recording the reason in `signals`
+rather than letting the order be rejected as retcode 10018. That single
+distinction closes the only way a cached offset can be wrong - a **DST
+transition, which lands on a Sunday**, while the market is shut and the cache is
+exactly what is in use. It costs nothing real, because no position can be opened
+on a closed market anyway.
+
+Provisional offsets re-measure on the fast cadence (`RETRY_SECONDS`, 60s) rather
+than the settled one (`REFRESH_SECONDS`, 6h), so the Sunday open confirms or
+corrects the cached value within a minute and entries resume by themselves. A
+cache older than 7 days, unreadable, or holding an implausible offset is
+discarded - each case leaves the clock exactly as if there were no cache, which
+is the safe direction.
+
+```powershell
+.venv\Scripts\python.exe scripts\test_clock_cache.py
+```
+
+Walks the real weekend - measure Friday, restart Saturday, open Sunday -
+including the DST case where the confirming tick disagrees with the cache, and
+the stale/corrupt/implausible cache cases.
+
 ### When the offset cannot be measured at all
 
 Measuring needs a *live* tick, so an engine started while the market is closed

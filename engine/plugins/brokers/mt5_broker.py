@@ -10,7 +10,7 @@ from engine.config import Settings
 from engine.core.interfaces.broker import BrokerAdapter
 from engine.core.models import AccountState, ClosedTradePnl, Direction, Position, PositionStatus
 from engine.sizing import SymbolLimits
-from engine.plugins.brokers.mt5_time import ServerClock
+from engine.plugins.brokers.mt5_time import ServerClock, clock_cache_path
 
 # connect() and _verify_server() both log through this; it was referenced on two
 # lines but never defined, so connect() raised NameError at the "attached:
@@ -85,7 +85,7 @@ class MT5BrokerAdapter(BrokerAdapter):
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._clock = ServerClock()
+        self._clock = ServerClock(cache_path=clock_cache_path(settings.account_key))
         # The account this adapter is bound to. Set from MT5_LOGIN when one is
         # configured; otherwise captured from the terminal on the FIRST connect
         # and never rewritten - see _bind_account().
@@ -203,6 +203,16 @@ class MT5BrokerAdapter(BrokerAdapter):
         if offset is None:
             return None
         return datetime.fromtimestamp(time.time() + offset, tz=timezone.utc).replace(tzinfo=None)
+
+    def clock_is_provisional(self) -> bool:
+        """True while the offset in use came from disk and no tick has confirmed it.
+
+        Exposed for the risk engine. Reading data on a cached offset is fine;
+        opening a position on one is not, because the single way a cached offset
+        can be wrong is a DST transition - and those happen on a Sunday, while
+        the market is shut and the cache is exactly what is in use.
+        """
+        return self._clock.is_provisional
 
     def _to_utc(self, epoch_seconds: float) -> datetime:
         # Raises ServerTimeUnavailable rather than returning a guessed time.

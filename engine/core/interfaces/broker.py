@@ -76,6 +76,21 @@ class BrokerAdapter(ABC):
         """
         return None
 
+    def clock_is_provisional(self) -> bool:
+        """True while the broker's clock is remembered rather than measured.
+
+        The MT5 adapter persists its measured UTC offset so a restart while the
+        market is shut does not leave it blind. A value read back from disk is
+        good enough to timestamp data with and deliberately not good enough to
+        open a position on - the one way it can be wrong is a DST transition,
+        and those land on a Sunday, while the market is closed and the cached
+        value is exactly what is in use.
+
+        Concrete, not abstract: an adapter with no such notion is never
+        provisional, so it never blocks.
+        """
+        return False
+
     @abstractmethod
     def get_price_value_per_lot(self, symbol: str) -> float | None:
         """Account-currency value of a 1.0 price move for 1.0 lot, or None if the
