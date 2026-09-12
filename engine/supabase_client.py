@@ -1,11 +1,23 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
 from engine.config import Settings
+
+logger = logging.getLogger(__name__)
+
+TIMEOUT_SECONDS = 10
+MAX_ATTEMPTS = 3
+BACKOFF_SECONDS = 1.5
+
+# Worth trying again: the gateway or the database was busy, not wrong. A 4xx is
+# excluded on purpose - a malformed request does not improve on the second ask.
+TRANSIENT_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
 
 
 class SupabaseError(RuntimeError):
@@ -55,11 +67,8 @@ class SupabaseClient:
             method="GET",
             headers={**self._headers(), "Prefer": "count=exact", "Range": "0-0"},
         )
-        try:
-            with urllib.request.urlopen(request, timeout=10) as response:
-                return int(response.headers["Content-Range"].split("/")[-1])
-        except urllib.error.HTTPError as exc:
-            raise SupabaseError(f"COUNT {table} failed: {exc.code} {exc.read().decode()}") from exc
+        _, headers = self._send(request, f"COUNT {table}")
+        return int(headers["Content-Range"].split("/")[-1])
 
     def update(self, table: str, filters: dict[str, str], patch: dict) -> None:
         query = urllib.parse.urlencode(filters)
@@ -72,14 +81,62 @@ class SupabaseClient:
             "Content-Type": "application/json",
         }
 
+    def _send(self, request: urllib.request.Request, label: str) -> tuple[bytes, dict]:
+        """One PostgREST call, retried past transient failures.
+
+        Single-shot was a real exposure, not a theoretical one. On 2026-09-12
+        Supabase served a run of 504s; the engine survived them because every
+        CALLER wraps its call in try/except - but surviving a write is not the
+        same as making it. _persist_opened_trade() logs the failure and carries
+        on to announce "TRADE OPENED", so one badly-timed 504 leaves a real
+        position open at the broker with no `trades` row: invisible to
+        reconciliation forever, absent from the dashboard, uncounted by the
+        evaluator. On the live account that is real money in a position nothing
+        is tracking. Retrying is what makes the common case actually write.
+
+        Retrying a POST is only safe because of what it writes into:
+        `trades.mt5_ticket` is `not null unique` (migration 0003) and `candles`
+        upserts on a unique key, so a retry of a write that silently DID land is
+        rejected rather than duplicated - see the 409 branch. `signals` and
+        `engine_heartbeats` have no such key and could gain a duplicate row that
+        way; that is accepted deliberately, because a duplicated evaluation
+        record is cosmetic and a missing trade record is not.
+        """
+        last: Exception | None = None
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+                    if attempt > 1:
+                        logger.info("%s succeeded on attempt %d", label, attempt)
+                    return response.read(), dict(response.headers)
+            except urllib.error.HTTPError as exc:
+                detail = exc.read().decode(errors="replace")
+                if exc.code == 409 and attempt > 1:
+                    # A unique key rejected this. On a RETRY that is the good
+                    # outcome: the attempt before it did land and the gateway
+                    # simply never said so. Treating it as success is what makes
+                    # the retry exactly-once rather than at-least-once.
+                    logger.info("%s: already applied by a previous attempt", label)
+                    return b"", {}
+                if exc.code not in TRANSIENT_STATUSES or attempt == MAX_ATTEMPTS:
+                    raise SupabaseError(f"{label} failed: {exc.code} {detail}") from exc
+                last = exc
+                logger.warning("%s: %d, retrying (%d/%d)", label, exc.code, attempt, MAX_ATTEMPTS)
+            except OSError as exc:
+                # URLError and socket timeouts both land here (both are OSError,
+                # and HTTPError is handled above). A connection that never
+                # completed is the clearest possible case for trying again.
+                if attempt == MAX_ATTEMPTS:
+                    raise SupabaseError(f"{label} failed: {exc}") from exc
+                last = exc
+                logger.warning("%s: %s, retrying (%d/%d)", label, exc, attempt, MAX_ATTEMPTS)
+            time.sleep(BACKOFF_SECONDS * attempt)
+        raise SupabaseError(f"{label} failed after {MAX_ATTEMPTS} attempts: {last}")
+
     def _request(self, method: str, path: str, body, extra_headers: dict | None = None):
         headers = self._headers()
         headers.update(extra_headers or {})
         data = json.dumps(body).encode() if body is not None else None
         request = urllib.request.Request(self._base + path, data=data, method=method, headers=headers)
-        try:
-            with urllib.request.urlopen(request, timeout=10) as response:
-                raw = response.read()
-                return json.loads(raw) if raw else None
-        except urllib.error.HTTPError as exc:
-            raise SupabaseError(f"{method} {path} failed: {exc.code} {exc.read().decode()}") from exc
+        raw, _ = self._send(request, f"{method} {path}")
+        return json.loads(raw) if raw else None

@@ -29,6 +29,7 @@ from engine.reporting import (
     stop_protected,
     trade_closed,
     trade_opened,
+    trade_untracked,
 )
 from engine.supabase_client import SupabaseClient
 
@@ -970,7 +971,11 @@ class EngineLoop:
                     }
                 ],
             )
+            tracked = True
         except Exception:
+            # SupabaseClient already retried this past any transient failure, so
+            # reaching here means the row is genuinely not there.
+            tracked = False
             logger.exception("failed to persist opened trade %s", position.id)
 
         logger.info(
@@ -982,6 +987,22 @@ class EngineLoop:
             "trade_opened",
             trade_opened(position, strategy_name, self._account_label(), risk_amount),
         )
+        if not tracked:
+            # The OPEN alert above has just told the user this trade is in hand.
+            # Leaving that uncorrected is the actual harm: a position no row
+            # exists for is invisible to _reconcile_closed_trades() forever, so
+            # without this the only symptom is a trade that never closes in the
+            # dashboard - which nobody reads as "the write failed". One log line
+            # was never going to be enough for a position holding real money.
+            logger.error(
+                "position %s (%s) is OPEN at the broker with no trades row - untracked",
+                position.id, position.symbol,
+            )
+            _notify_all(
+                self._engine,
+                "trade_untracked",
+                trade_untracked(position, strategy_name, self._account_label()),
+            )
 
     def _reconcile_closed_trades(self, open_positions: list) -> None:
         broker = self._engine.broker

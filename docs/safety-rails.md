@@ -196,6 +196,48 @@ Drives all three paths with a clock that never measures and asserts on the log:
 no tracebacks, one line per outage, and it still speaks when the reason changes.
 Run it after touching anything that reads a broker timestamp.
 
+## A Supabase wobble must not lose a trade
+
+Every caller wraps its Supabase call in try/except, so the engine *survives* an
+outage. Surviving a write is not making it. `SupabaseClient` was single-shot,
+and on 2026-09-12 Supabase served a run of 504s - visible in both engine logs,
+and the same flakiness that set off the watchdog.
+
+The dangerous one is `_persist_opened_trade()`. It logged the failure and
+carried on to announce **TRADE OPENED**, so one badly-timed 504 would leave a
+real position open at the broker with no `trades` row: invisible to
+`_reconcile_closed_trades()` forever, absent from the dashboard, uncounted by
+the evaluator - on the live account, real money in a position nothing tracks.
+The same end state as the order-timeout bug in the next section, reached from
+the opposite side.
+
+Two changes, because reducing the odds is not the same as bounding the damage:
+
+1. **`SupabaseClient._send()` retries transient failures** - 5xx, 408/425/429,
+   timeouts and dropped connections - three attempts with linear backoff. A 4xx
+   raises immediately: a malformed request does not improve on the second ask.
+   Retrying a POST is safe here *because of the schema*: `trades.mt5_ticket` is
+   `not null unique` (migration 0003) and `candles` upserts on a unique key, so
+   a retry of a write that silently DID land comes back 409 and is treated as
+   success - exactly-once, not at-least-once. `signals` and `engine_heartbeats`
+   have no such key and could gain a duplicate row; that is accepted, because a
+   duplicated evaluation record is cosmetic and a missing trade record is not.
+
+2. **A write that still fails is announced**, via `trade_untracked()`. The OPEN
+   alert has just told the user the trade is in hand, so leaving that
+   uncorrected is the actual harm - the only other symptom is a trade that never
+   closes in the dashboard, which nobody reads as "the write failed". The alert
+   is precise about what still protects the position (the broker's own SL/TP
+   are set and will fire) and what does not.
+
+```powershell
+.venv\Scripts\python.exe scripts\test_supabase_retry.py
+```
+
+Drives the real client against a stub PostgREST: a write survives two 504s, a
+504 on a write that *secretly landed* is stored exactly once, a permanent
+outage still raises so the caller can alert, and a 400 raises without retrying.
+
 ## A client-side order error doesn't mean the order failed
 
 Also found live: `place_order()` raised `MT5ConnectionError` with MT5 retcode

@@ -93,6 +93,26 @@ def trade_opened(position, strategy: str, account: str, risk_amount: float | Non
     )
 
 
+def trade_untracked(position, strategy: str, account: str) -> str:
+    """The position exists at the broker; the database never heard about it.
+
+    Sent straight after the normal OPEN alert, because that alert has already
+    told the user the trade is being handled and this is the correction. The
+    detail is deliberately precise about what still protects the position and
+    what does not: the broker's own SL/TP are set and will still fire, so this
+    is not "unprotected money" - but nothing on this side will record the
+    outcome, and reconciliation only ever looks at tickets it has a row for.
+    """
+    return _line(
+        "⚠️",
+        f"NOT RECORDED  ·  {position.symbol} {position.direction.value}",
+        f"{strategy}  ·  {account}",
+        f"ticket {position.id} is OPEN at the broker but could not be saved to the database.\n"
+        "Its SL/TP still apply. The engine will not record its result, and it will not "
+        "appear in the dashboard or the strategy's record - save or close it by hand.",
+    )
+
+
 def trade_closed(symbol: str, direction, breakdown, strategy: str, account: str) -> str:
     """A win reports gross profit before fees; a loss reports the all-in figure.
     Win/loss is decided by the NET result, so a small gain eaten by commission
