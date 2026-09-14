@@ -195,11 +195,19 @@ class MT5BrokerAdapter(BrokerAdapter):
     def server_now(self) -> datetime | None:
         """The broker's wall clock right now, naive, or None if unmeasured.
 
-        offset_if_known() rather than offset(): a time-of-day rule that cannot
-        be evaluated should be skipped, not turned into an exception that stops
-        the engine.
+        refresh() rather than offset(): a time-of-day rule that cannot be
+        evaluated should be skipped, not turned into an exception that stops
+        the engine - and refresh() returns None instead of raising.
+
+        refresh() rather than offset_if_known(), which is what this used to
+        call: that only READ the clock, and on this adapter the only other
+        caller that ever measured it was _to_utc(), which runs only when there
+        is a deal or a position to timestamp. So on a quiet account nothing
+        measured the clock after a closed-market start, this stayed None
+        indefinitely, and the rollover blackout was silently skipped. refresh()
+        is throttled, so calling it per signal costs a comparison, not a probe.
         """
-        offset = self._clock.offset_if_known()
+        offset = self._clock.refresh()
         if offset is None:
             return None
         return datetime.fromtimestamp(time.time() + offset, tz=timezone.utc).replace(tzinfo=None)
@@ -211,7 +219,17 @@ class MT5BrokerAdapter(BrokerAdapter):
         opening a position on one is not, because the single way a cached offset
         can be wrong is a DST transition - and those happen on a Sunday, while
         the market is shut and the cache is exactly what is in use.
+
+        Refreshes before answering, and that is not optional. Returning the
+        stored flag alone deadlocked a quiet account: the flag only clears when
+        the clock re-measures, this adapter's clock only re-measured from
+        _to_utc(), and _to_utc() only runs with a deal or position to stamp -
+        which an account whose every entry is being refused will never get. So
+        after a weekend restart with a cache on disk, the live account would
+        have refused every signal until something forced a reconnect. Found
+        2026-09-14, before any cache existed for it to bite on.
         """
+        self._clock.refresh()
         return self._clock.is_provisional
 
     def _to_utc(self, epoch_seconds: float) -> datetime:

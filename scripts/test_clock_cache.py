@@ -46,6 +46,7 @@ def _symbol_info_tick(symbol):
 
 
 fake_mt5.symbol_info_tick = _symbol_info_tick
+fake_mt5.ORDER_TYPE_BUY, fake_mt5.ORDER_TYPE_SELL = 0, 1   # read at mt5_broker import
 sys.modules["MetaTrader5"] = fake_mt5
 
 from engine.plugins.brokers import mt5_time                      # noqa: E402
@@ -133,6 +134,39 @@ def main() -> int:
     }), encoding="utf-8")
     passed.append(check("31h offset refused",
                         offset_or_none(ServerClock("EURUSD", cache_path=silly)), "REFUSED"))
+
+    print("\na QUIET account through a weekend restart - no deals, no positions")
+    # The broker adapter's clock was only ever refreshed from _to_utc(), which
+    # runs only when there is a deal or a position to timestamp. On an account
+    # with neither - the live account, most days - nothing refreshed it, so a
+    # remembered offset stayed provisional forever and the risk engine refused
+    # EVERY entry until something happened to force a reconnect. Found
+    # 2026-09-14, before it ever fired: the first weekend restart with a cache
+    # on disk would have silenced the live account indefinitely.
+    from engine.plugins.brokers.mt5_broker import MT5BrokerAdapter
+    MARKET.update(open=True, server_offset_hours=3)
+    ServerClock("EURUSD", cache_path=cache).refresh(force=True)      # Friday: cache written
+    MARKET["open"] = False
+    broker = object.__new__(MT5BrokerAdapter)                         # Saturday restart
+    broker._clock = ServerClock("EURUSD", cache_path=cache)
+    broker._clock.refresh(force=True)                                 # connect() while shut
+    passed.append(check("provisional over the weekend - entries refused",
+                        broker.clock_is_provisional(), True))
+    MARKET["open"] = True                                             # Sunday open
+    broker._clock._attempted_at = 0.0                                 # a minute has passed
+    passed.append(check("confirms itself at the open with nothing else touching it",
+                        broker.clock_is_provisional(), False))
+
+    print("\na QUIET account restarted with NO cache - the rollover rule needs a clock")
+    MARKET["open"] = False
+    blind_broker = object.__new__(MT5BrokerAdapter)
+    blind_broker._clock = ServerClock("EURUSD", cache_path=WORK / "never-written.json")
+    blind_broker._clock.refresh(force=True)
+    passed.append(check("no server time while shut", blind_broker.server_now(), None))
+    MARKET["open"] = True
+    blind_broker._clock._attempted_at = 0.0
+    passed.append(check("server time known after the open, without a deal or position",
+                        blind_broker.server_now() is not None, True))
 
     print(f"\n{sum(passed)}/{len(passed)} checks passed")
     return 0 if all(passed) else 1

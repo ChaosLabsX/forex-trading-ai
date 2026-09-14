@@ -195,6 +195,21 @@ cache older than 7 days, unreadable, or holding an implausible offset is
 discarded - each case leaves the clock exactly as if there were no cache, which
 is the safe direction.
 
+**"Re-measures every 60s" is only true if something asks.** `ServerClock` is
+throttled, not scheduled: it measures when read. As first shipped, the broker
+adapter's `clock_is_provisional()` and `server_now()` read the stored state
+without refreshing, and its only refreshing caller was `_to_utc()` - which runs
+only when there is a deal or position to timestamp. On a quiet account that is
+nothing, so after a weekend restart with a cache on disk the live account would
+have stayed provisional and **refused every entry indefinitely** - a deadlock,
+since the thing that would clear the flag is a trade the flag was blocking. The
+same gap left `server_now()` at `None` on a quiet account, silently skipping the
+rollover blackout. Found 2026-09-14 before any cache existed for it to bite on
+(the gate had rejected zero signals); both accessors now call `refresh()`.
+`test_clock_cache.py` covers the quiet-account case explicitly - the lesson
+being that a test of the clock alone passed while the adapter wrapping it was
+broken.
+
 ```powershell
 .venv\Scripts\python.exe scripts\test_clock_cache.py
 ```

@@ -11,6 +11,7 @@ import logging
 from datetime import datetime, time as dtime, timedelta, timezone
 
 from engine.evaluator import ALMOST_READY, NOT_READY, READY, Evaluation
+from engine.gating import strategy_block_reason
 from engine.stats import TradeStats
 
 logger = logging.getLogger("engine.reporting")
@@ -245,6 +246,9 @@ def build_daily_summary(supabase, account_block: str | None, now: datetime | Non
 
     # --- engines -----------------------------------------------------------
     lines.append("ENGINES")
+    # Guard 1 (LIVE_TRADING_ENABLED) lives in the running engine's env file, not
+    # in any table, so the only honest source is what that engine last reported.
+    guard1: dict[str, bool | None] = {}
     for account in accounts:
         beats = supabase.select(
             "engine_heartbeats",
@@ -256,6 +260,10 @@ def build_daily_summary(supabase, account_block: str | None, now: datetime | Non
                 warnings.append(f"{account['key']} has never sent a heartbeat")
             continue
         beat = beats[0]
+        detail = beat.get("detail") or ""
+        guard1[account["key"]] = (
+            True if "live_trading=on" in detail else False if "live_trading=off" in detail else None
+        )
         age = (now - datetime.fromisoformat(beat["created_at"].replace("Z", "+00:00"))).total_seconds()
         state = beat.get("status", "?")
         if age > STALE_HEARTBEAT_SECONDS:
@@ -328,8 +336,44 @@ def build_daily_summary(supabase, account_block: str | None, now: datetime | Non
     # --- warnings ----------------------------------------------------------
     if account_block:
         warnings.append(account_block)
-    if by_verdict.get(READY, 0) == 0:
-        warnings.append("no strategy is Ready - live trading would place no trades by design")
+    # What each enabled LIVE account can actually do - decided by the engine's
+    # own rule (gating.strategy_block_reason), never re-derived here. This used
+    # to say "no strategy is Ready - live trading would place no trades by
+    # design" whenever nothing was Ready, ignoring live_override: so every
+    # summary told you the live account could not trade while london_breakout_v1
+    # was cleared to place real orders on an override. Wrong in the direction
+    # that matters most - it reassures you real money is idle when it is not.
+    strategies_by_name = {s["name"]: s for s in strategies}
+    for account in accounts:
+        if account.get("account_type") != "live" or not account.get("enabled"):
+            continue
+        key = account["key"]
+        pairs = {link["strategy_name"]: link for link in links if link["account_key"] == key}
+        cleared = sorted(
+            name for name in pairs
+            if strategy_block_reason(strategies_by_name.get(name), pairs[name], True, key) is None
+        )
+        if not cleared:
+            warnings.append(f"{key}: no strategy is cleared for live - it will place no trades")
+        elif guard1.get(key) is False:
+            warnings.append(
+                f"{key}: {len(cleared)} strategy(s) cleared, but LIVE_TRADING_ENABLED is off - "
+                "no real order can be placed"
+            )
+        else:
+            # Cleared on an override rather than a Ready verdict. Said every day on
+            # purpose: it is a deliberate bet on an unproven edge, and a digest
+            # that stopped mentioning it would let that fact fade into background.
+            unproven = [
+                f"{name} ({_LABEL.get(strategies_by_name[name].get('readiness'), '?')})"
+                for name in cleared
+                if strategies_by_name[name].get("readiness") != READY
+            ]
+            if unproven:
+                warnings.append(
+                    f"{key} is trading real money on override, not a Ready verdict: "
+                    + ", ".join(unproven)
+                )
 
     lines += ["", "WARNINGS"]
     if warnings:

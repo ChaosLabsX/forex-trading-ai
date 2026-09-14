@@ -33,6 +33,38 @@ CACHE_TTL_SECONDS = 30  # dashboard toggles land within this; not per-2s-tick lo
 # implemented. See docs/going-live.md.
 
 
+def strategy_block_reason(strategy: dict | None, pair: dict | None, is_live: bool, account_key: str) -> str | None:
+    """Why this strategy may not trade on this account, or None if it may.
+
+    The per-strategy half of the gate, as a pure function, so there is exactly
+    ONE copy of the rule. There used to be three: this module, the dashboard's
+    live-state label, and the Telegram daily summary. The two copies drifted -
+    both ignored live_override - so on 2026-09-12 the dashboard called an armed
+    live account "blocked", and every daily summary since has said live trading
+    "would place no trades by design" while london_breakout_v1 was cleared to
+    place real orders. Anything that needs to know whether a strategy can trade
+    must ask this, not re-derive it.
+
+    Account-wide blocks (account disabled, LIVE_TRADING_ENABLED off) are not
+    decided here - they block every strategy at once and are the caller's to
+    check first. See StrategyGate._compute for the order of authority.
+    """
+    if strategy is None:
+        return "not registered in the strategies table"
+    if strategy.get("retired"):
+        return "retired"
+    if pair is None:
+        return f"not linked to account {account_key}"
+    if not pair.get("enabled"):
+        return "disabled (manual toggle off)"
+    if is_live and strategy.get("readiness") != "ready" and not pair.get("live_override"):
+        return (
+            f"readiness is '{strategy.get('readiness')}' - live requires 'ready' "
+            f"(or an explicit live_override)"
+        )
+    return None
+
+
 @dataclass(frozen=True)
 class AccountInfo:
     key: str
@@ -173,21 +205,11 @@ class StrategyGate:
             pair = pairs.get(name)
             if pair is not None:
                 risk_pct[name] = pair.get("risk_pct")
-            if strategy is None:
-                blocked[name] = "not registered in the strategies table"
-            elif strategy.get("retired"):
-                blocked[name] = "retired"
-            elif pair is None:
-                blocked[name] = f"not linked to account {self._account_key}"
-            elif not pair.get("enabled"):
-                blocked[name] = "disabled (manual toggle off)"
-            elif account.is_live and strategy.get("readiness") != "ready" and not pair.get("live_override"):
-                blocked[name] = (
-                    f"readiness is '{strategy.get('readiness')}' - live requires 'ready' "
-                    f"(or an explicit live_override)"
-                )
-            else:
+            reason = strategy_block_reason(strategy, pair, account.is_live, self._account_key)
+            if reason is None:
                 eligible.add(name)
+            else:
+                blocked[name] = reason
         return Gate(frozenset(eligible), blocked, None, risk_pct)
 
     def risk_pct_for(self, strategy_name: str) -> float | None:
