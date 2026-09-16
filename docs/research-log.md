@@ -68,8 +68,32 @@ too few to read an edge from: v1's own CI was 1.24R wide at 50 trades. Any
 decision about live rests on the backtest and a larger demo sample, not the
 month alone.
 
-**Results:** pending. Backtests are to be run on the VPS; the demo review is due
-~2026-10-16.
+**Backtest results (2026-09-16, run on the VPS the same day as the demo launch).**
+v1 was re-run alongside the two extensions so all three share one spread snapshot.
+Net of costs:
+
+| Strategy | Trades | Expectancy | 95% CI | Gross | Median cost | Halves |
+|---|---|---|---|---|---|---|
+| `london_breakout_v1` (re-run) | 1,070 | -0.060R | [-0.133, +0.015] | +0.018R | 0.074R | -0.057 / -0.063 |
+| `london_breakout_wide_v1` | 2,129 | -0.052R | [-0.104, +0.000] | +0.032R | 0.074R | -0.078 / -0.026 |
+| `london_breakout_crosses_v1` | 1,171 | **-0.132R** | **[-0.202, -0.060]** | -0.031R | 0.095R | -0.076 / **-0.189** |
+
+- **Crosses: FAILED its screen.** -0.132R is below both v1's recorded -0.088R and
+  the same-day -0.060R. The CI sits entirely below zero, the second half is worse
+  than the first, and even the gross signal is negative, so no cost assumption
+  rescues it. Its predictions held: no better than v1, and a higher cost (0.095R
+  against 0.074R). By the stop rule above, it is not to be adjusted. The owner
+  decides whether the demo run stops now.
+- **Wide: passed its screen, and its per-trade prediction was WRONG.** Trade count
+  came in at 2.0x v1's, as predicted. The per-trade result was not lower: -0.052R
+  against v1's -0.060R. The added setups alone come to roughly 1,059 trades at
+  -0.044R net and +0.046R gross, which is no worse than v1's own trades. The gap
+  is well inside the noise, though, and the conclusion that matters is unchanged:
+  **neither version has an edge after costs.** Loosening did not damage the
+  strategy, and it did not create an edge either. More trades of a
+  slightly-negative strategy means proportionally more expected loss.
+
+**Demo review** is due ~2026-10-16.
 
 ## 2026-08-30 - The demo lab's first out-of-sample read on the backtests
 
@@ -228,8 +252,8 @@ Reversible in one field if that judgement is ever revisited.
 | `donchian_breakout_v1` | 20-bar price-channel momentum, FX | 15,024 | −0.090R | **negative** |
 | `donchian_trending_v1` | Same logic, trending assets | 8,856 | −0.122R | **negative** |
 | `range_fade_h4_v1` | Same logic as `range_fade_v1`, at H4 | 5,715 | −0.042R | **negative** |
-| `london_breakout_crosses_v1` | Same logic as `london_breakout_v1`, 5 EUR/GBP/CHF/CAD crosses | - | - | pending (pre-registered 2026-09-16) |
-| `london_breakout_wide_v1` | `london_breakout_v1` with a 1.75x compression limit | - | - | pending (pre-registered 2026-09-16) |
+| `london_breakout_crosses_v1` | Same logic as `london_breakout_v1`, 5 EUR/GBP/CHF/CAD crosses | 1,171 | −0.132R | **negative** (CI entirely below zero; failed its pre-registered screen) |
+| `london_breakout_wide_v1` | `london_breakout_v1` with a 1.75x compression limit | 2,129 | −0.052R | zero (v1 re-run same day: −0.060R over 1,070) |
 
 Six strategies, five mechanisms: `range_fade_h4_v1` and `donchian_trending_v1`
 are not new ideas, they are the *same* mechanism aimed at unseen data - which is
