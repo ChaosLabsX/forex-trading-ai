@@ -17,6 +17,8 @@ PLUGIN_REGISTRY: dict[str, dict[str, str]] = {
     "strategy": {
         "ema_trend_v1": "engine.plugins.strategies.ema_trend_v1:EMATrendStrategy",
         "london_breakout_v1": "engine.plugins.strategies.london_breakout_v1:LondonBreakoutStrategy",
+        "london_breakout_crosses_v1": "engine.plugins.strategies.london_breakout_crosses_v1:LondonBreakoutCrossesStrategy",
+        "london_breakout_wide_v1": "engine.plugins.strategies.london_breakout_wide_v1:LondonBreakoutWideStrategy",
         "range_fade_v1": "engine.plugins.strategies.range_fade_v1:RangeFadeStrategy",
         "range_fade_h4_v1": "engine.plugins.strategies.range_fade_h4_v1:RangeFadeH4Strategy",
         "donchian_breakout_v1": "engine.plugins.strategies.donchian_breakout_v1:DonchianBreakoutStrategy",

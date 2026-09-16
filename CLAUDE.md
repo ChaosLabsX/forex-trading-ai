@@ -18,7 +18,10 @@ refusal is the product.
 
 - **Engine: live 24/7** on the VPS (`162.220.166.12`) via Task Scheduler +
   auto-login. Survives reboots unattended (verified).
-- **6 strategies** run in the demo lab across 16-25 instruments.
+- **8 strategies** run in the demo lab across 30 instruments. Two of them,
+  `london_breakout_crosses_v1` and `london_breakout_wide_v1`, are demo-only
+  extensions added 2026-09-16; their predictions are pre-registered in the
+  research log. Both are `enabled=false` on live.
 - **No demonstrated edge. Nothing is READY.** ~37,000 simulated trades across
   5 mechanisms and up to 12.7 years of history. See
   [`docs/research-log.md`](docs/research-log.md) - **read it before proposing a

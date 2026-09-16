@@ -49,6 +49,10 @@ class LondonBreakoutStrategy(StrategyPlugin):
     name = "london_breakout_v1"
     required_timeframes = (ENTRY_TIMEFRAME,)
     instruments = UNIVERSE
+    # A class attribute rather than the bare constant only so a subclass can
+    # move this ONE dimension and inherit everything else untouched - see
+    # london_breakout_wide_v1. This strategy's value is unchanged.
+    max_range_atr_multiple = MAX_RANGE_ATR_MULTIPLE
 
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
@@ -88,11 +92,11 @@ class LondonBreakoutStrategy(StrategyPlugin):
         if atr_value is None or atr_value <= 0:
             return StrategyEvaluation(None, "ATR unavailable")
 
-        if range_size > MAX_RANGE_ATR_MULTIPLE * atr_value:
+        if range_size > self.max_range_atr_multiple * atr_value:
             return StrategyEvaluation(
                 None,
                 f"Asian range {range_size:.5f} is not compressed "
-                f"(> {MAX_RANGE_ATR_MULTIPLE}x ATR {atr_value:.5f}) - nothing coiled to release",
+                f"(> {self.max_range_atr_multiple}x ATR {atr_value:.5f}) - nothing coiled to release",
             )
 
         # The break must be FRESH: the prior bar closed inside the range. Without
@@ -124,7 +128,7 @@ class LondonBreakoutStrategy(StrategyPlugin):
                 take_profit=entry + sign * TARGET_ATR_MULTIPLE * atr_value,
                 reason=(
                     f"London-open break {direction.value} of a compressed Asian range "
-                    f"({range_size:.5f} <= {MAX_RANGE_ATR_MULTIPLE}x ATR)"
+                    f"({range_size:.5f} <= {self.max_range_atr_multiple}x ATR)"
                 ),
                 metadata={
                     "asian_high": asian_high,

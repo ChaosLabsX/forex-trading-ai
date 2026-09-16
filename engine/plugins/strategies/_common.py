@@ -78,8 +78,31 @@ TRENDING_CURRENCIES: dict[str, tuple[str, ...]] = {
 # Read the eight symbols above; gold is the control, not the evidence.
 TRENDING_UNIVERSE: tuple[str, ...] = tuple(TRENDING_CURRENCIES) + ("XAUUSD",)
 
-# One lookup for the blackout, so a symbol added to either universe is covered.
-ALL_CURRENCIES: dict[str, tuple[str, ...]] = {**INSTRUMENT_CURRENCIES, **TRENDING_CURRENCIES}
+# --- London-open crosses ------------------------------------------------------
+#
+# The FX crosses UNIVERSE lacks whose BOTH currencies are quiet in the Asian
+# session - the only pairs london_breakout's premise (a thin overnight range
+# released at the London open) applies to. Chosen by that rule, before any result
+# on these pairs was seen. The rule is supported by trade FREQUENCY, not outcome:
+# over 28 clean demo days, london_breakout_v1's 1.5x compression check passed on
+# EURGBP 9 days, GBPUSD 8, EURUSD 5, USDCAD 4, USDCHF 3 - and on AUDUSD, EURAUD,
+# USDJPY and XAUUSD never, because Asia is when JPY/AUD/NZD are busy.
+#
+# DELIBERATELY EXCLUDED: every AUD/NZD/JPY cross. By the same rule they would
+# almost never compress, so they would add symbols without adding trades.
+LONDON_CROSS_CURRENCIES: dict[str, tuple[str, ...]] = {
+    "EURCHF": ("EUR", "CHF"),
+    "GBPCHF": ("GBP", "CHF"),
+    "EURCAD": ("EUR", "CAD"),
+    "GBPCAD": ("GBP", "CAD"),
+    "CADCHF": ("CAD", "CHF"),
+}
+LONDON_CROSSES: tuple[str, ...] = tuple(LONDON_CROSS_CURRENCIES)
+
+# One lookup for the blackout, so a symbol added to any universe is covered.
+ALL_CURRENCIES: dict[str, tuple[str, ...]] = {
+    **INSTRUMENT_CURRENCIES, **TRENDING_CURRENCIES, **LONDON_CROSS_CURRENCIES,
+}
 
 NEWS_BLACKOUT_MINUTES = 30
 

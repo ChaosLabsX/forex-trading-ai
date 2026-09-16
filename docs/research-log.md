@@ -12,6 +12,65 @@ commission), entries filled at the next bar's open, and judged by a bootstrap
 Six strategies, five mechanisms, ~37,000 simulated trades, 3-12.7 years of real
 history per instrument. Not one produced an edge that survives retail costs.
 
+## 2026-09-16 - Pre-registered: two `london_breakout_v1` extensions, demo only
+
+Written before either strategy produced a single trade or a backtest.
+
+**Why.** The owner wants `london_breakout_v1` to trade more often without
+trading riskier. It averages ~1.1 trades a day and fired nothing from 09-14 to
+09-16. Both extensions run on the demo lab only. Plugins load on both engines,
+but a new strategy is linked to the live account with `enabled=false`, so guard
+3 blocks them there. `london_breakout_v1` itself is unchanged: 0 differences in
+226,573 evaluations on stored candles, before vs after the refactor that made
+the limit overridable.
+
+Each extension moves exactly one thing, so a result can be pinned on it.
+
+| Strategy | Changes | Keeps |
+|---|---|---|
+| `london_breakout_crosses_v1` | pairs: EURCHF, GBPCHF, EURCAD, GBPCAD, CADCHF | everything, including 1.5x |
+| `london_breakout_wide_v1` | compression limit 1.75x instead of 1.5x | the 16 symbols, everything else |
+
+**What the choices were based on: frequency only, no outcomes.** Over 28 clean
+demo days, the 1.5x check passed on 9.2% of symbol-days. EURGBP passed on 9 days,
+GBPUSD 8, EURUSD 5, USDCAD 4 and USDCHF 3; AUDUSD, EURAUD, USDJPY and XAUUSD
+never passed. So the crosses are the remaining pairs whose two currencies are
+both quiet in Asia; no AUD, NZD or JPY pair qualifies. The limit 1.75x doubles
+the pass rate to 19.4% (2.0x would give 31.7%, 2.5x 58.5%).
+
+**Honest status against the standing rule.** The crosses test qualifies: it is
+the same mechanism aimed at unseen data, with pairs picked by a rule. The wide
+test does not fully qualify. It loosens the mechanism's own filter, which makes
+it a parameter variant. It is run at the owner's request on that understanding,
+and is allowed only because it is ONE value, declared here, and never tuned.
+
+**Predictions.**
+- `london_breakout_crosses_v1`: 0.5-0.8 trades a day. Backtest expectancy no
+  better than v1's -0.088R. Realised cost at or above v1's +0.100R, because
+  crosses have wider spreads.
+- `london_breakout_wide_v1`: about twice v1's trades. A replay on stored candles
+  gave 138 fires against v1's 73, and every v1 fire was also a wide fire.
+  Per-trade expectancy will be BELOW v1's, in the backtest and on demo, because
+  the added setups come from less-compressed nights. The informative sample is
+  the trades v1 did not take; read those, not the headline.
+
+**Stop rules, fixed now.**
+- If a backtest comes in below v1's -0.088R, that extension has failed its
+  screen. Record it here; do not adjust it.
+- No second value of the limit (2.0x, 2.25x ...). No dropping individual pairs
+  or symbols by their results. Either move turns a test into a search.
+- The READY bar is unchanged: 30 trades for `almost_ready`, 100 for `ready`.
+
+**What the planned one-month demo (to ~2026-10-16) can and cannot show.** It can
+show real trade frequency, realised cost per trade, and that both run correctly.
+At the predicted rates that is ~40 trades for wide and ~15 for crosses, which is
+too few to read an edge from: v1's own CI was 1.24R wide at 50 trades. Any
+decision about live rests on the backtest and a larger demo sample, not the
+month alone.
+
+**Results:** pending. Backtests are to be run on the VPS; the demo review is due
+~2026-10-16.
+
 ## 2026-08-30 - The demo lab's first out-of-sample read on the backtests
 
 739 closed demo trades (2026-07-16 to 08-30) are now the first live check on the
@@ -169,6 +228,8 @@ Reversible in one field if that judgement is ever revisited.
 | `donchian_breakout_v1` | 20-bar price-channel momentum, FX | 15,024 | −0.090R | **negative** |
 | `donchian_trending_v1` | Same logic, trending assets | 8,856 | −0.122R | **negative** |
 | `range_fade_h4_v1` | Same logic as `range_fade_v1`, at H4 | 5,715 | −0.042R | **negative** |
+| `london_breakout_crosses_v1` | Same logic as `london_breakout_v1`, 5 EUR/GBP/CHF/CAD crosses | - | - | pending (pre-registered 2026-09-16) |
+| `london_breakout_wide_v1` | `london_breakout_v1` with a 1.75x compression limit | - | - | pending (pre-registered 2026-09-16) |
 
 Six strategies, five mechanisms: `range_fade_h4_v1` and `donchian_trending_v1`
 are not new ideas, they are the *same* mechanism aimed at unseen data - which is

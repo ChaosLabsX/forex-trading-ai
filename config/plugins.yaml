@@ -11,6 +11,13 @@ strategies:
   # best is how you select noise and lose real money.
   - ema_trend_v1          # MA-crossover trend-following (reference implementation)
   - london_breakout_v1    # scheduled volatility regime shift at the London open
+  # Two DEMO-ONLY extensions of london_breakout_v1, each moving exactly one thing
+  # so a result can be pinned on it (pre-registered in docs/research-log.md,
+  # 2026-09-16). Both load on the live engine too - plugins are global - but a
+  # new strategy is linked to a live account with enabled=false, so guard 3
+  # blocks them there until you deliberately switch one on.
+  - london_breakout_crosses_v1  # same logic, 5 EUR/GBP/CHF/CAD crosses it never traded
+  - london_breakout_wide_v1     # same 16 symbols, compression limit 1.75x instead of 1.5x
   - range_fade_v1         # mean reversion - the complement of ema_trend_v1 (ADX < 20)
   # Same fade one scale up. range_fade_v1 has a REAL gross edge (+0.044R/trade,
   # CI above zero) that its 0.066R costs consume. Cost-in-R falls as the stop
