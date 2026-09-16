@@ -18,10 +18,11 @@ refusal is the product.
 
 - **Engine: live 24/7** on the VPS (`162.220.166.12`) via Task Scheduler +
   auto-login. Survives reboots unattended (verified).
-- **8 strategies** run in the demo lab across 30 instruments. Two of them,
-  `london_breakout_crosses_v1` and `london_breakout_wide_v1`, are demo-only
-  extensions added 2026-09-16; their predictions are pre-registered in the
-  research log. Both are `enabled=false` on live.
+- **3 strategies** run in the demo lab across 16 instruments: `ema_trend_v1`,
+  `london_breakout_v1`, and `london_breakout_wide_v1`, a demo-only extension
+  added 2026-09-16 (pre-registered in the research log; `enabled=false` on live).
+  Five more are retired and no longer loaded, but still registered, so they can
+  be backtested.
 - **No demonstrated edge. Nothing is READY.** ~37,000 simulated trades across
   5 mechanisms and up to 12.7 years of history. See
   [`docs/research-log.md`](docs/research-log.md) - **read it before proposing a
@@ -40,8 +41,9 @@ refusal is the product.
   edge is real would take ~369 trades (~18 months). The $200 is sized as tuition,
   not as an investment - do not let anything in here imply the edge is settled.
 - **The demo lab keeps running regardless**, and remains the only thing that
-  produces a READY verdict. `donchian_breakout_v1` and `donchian_trending_v1`
-  are retired (both CIs entirely below zero).
+  produces a READY verdict. Retired: `donchian_breakout_v1`,
+  `donchian_trending_v1` (2026-08-30), `range_fade_v1`, `range_fade_h4_v1` and
+  `london_breakout_crosses_v1` (2026-09-16) - reasons in the research log.
 
 ## Hard constraint - read before proposing anything MT5-related
 

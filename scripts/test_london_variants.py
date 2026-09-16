@@ -178,7 +178,10 @@ def main() -> int:
     passed.append(check("both load through the registry",
                         [load_plugin("strategy", key, None).name for key in NEW], list(NEW)))
     names = [s.name for s in build_engine(settings=Settings(test_mode=True)).strategies]
-    passed.append(check("both listed in config/plugins.yaml", all(key in names for key in NEW), True))
+    # crosses failed its backtest screen and was retired 2026-09-16: still
+    # registered (so it can be re-backtested), no longer loaded by the engine.
+    passed.append(check("wide listed in config/plugins.yaml", "london_breakout_wide_v1" in names, True))
+    passed.append(check("retired crosses no longer loaded", "london_breakout_crosses_v1" in names, False))
     passed.append(check("london_breakout_v1 still listed", "london_breakout_v1" in names, True))
 
     print("\nREAL MONEY: on the live account they arrive switched off")

@@ -82,8 +82,8 @@ Net of costs:
   the same-day -0.060R. The CI sits entirely below zero, the second half is worse
   than the first, and even the gross signal is negative, so no cost assumption
   rescues it. Its predictions held: no better than v1, and a higher cost (0.095R
-  against 0.074R). By the stop rule above, it is not to be adjusted. The owner
-  decides whether the demo run stops now.
+  against 0.074R). By the stop rule above, it is not to be adjusted. **Retired
+  2026-09-16** at the owner's instruction, before it placed a single demo trade.
 - **Wide: passed its screen, and its per-trade prediction was WRONG.** Trade count
   came in at 2.0x v1's, as predicted. The per-trade result was not lower: -0.052R
   against v1's -0.060R. The added setups alone come to roughly 1,059 trades at
@@ -242,17 +242,35 @@ of sample, and the demo run put both CIs entirely below zero over 261 and 172
 trades. They were 59% of all lab trades and were no longer buying information.
 Reversible in one field if that judgement is ever revisited.
 
+Three more were retired on **2026-09-16**, and all five retired strategies were
+removed from `config/plugins.yaml`. They are still in `engine/registry.py`, so
+`scripts/backtest.py` can re-run any of them, and their trades stay in the
+database. Neither position management nor reconciliation depends on that list,
+so their open demo positions still close normally.
+
+| Strategy | Demo at retirement | Backtest | Why |
+|---|---|---|---|
+| `range_fade_v1` | 271 trades, -0.144R, CI [-0.278, -0.008], drawdown 54.8R | net CI entirely below zero | both CIs below zero, the donchian standard |
+| `range_fade_h4_v1` | 76 trades, -0.200R, CI [-0.432, +0.048], drawdown 21.5R | CI [-0.074, -0.010] over 5,715 trades | a 12.7-year negative backtest that 76 demo trades cannot overturn, and a demo drawdown past the 15R limit. Its demo CI does NOT yet sit entirely below zero, so this rests on the backtest |
+| `london_breakout_crosses_v1` | 0 trades | -0.132R, CI [-0.202, -0.060] | failed its pre-registered screen |
+
+`ema_trend_v1` was kept deliberately. It stands at -0.417R, but on 12 trades,
+which is noise in either direction, and retiring on that would be judging a
+coin by three flips. Retiring `range_fade_v1` also removes most of the AI
+reviewer's remaining source of scoreable reviews (see above); that experiment
+was already not converging.
+
 ## The strategies
 
 | Strategy | Mechanism | Trades | Net expectancy | Verdict |
 |---|---|---|---|---|
 | `ema_trend_v1` | MA-crossover trend-following | 61 | ~0 | no edge (also far too rare to judge: ~19/yr) |
 | `london_breakout_v1` | Compressed Asian range breaks at London open | 1,148 | −0.088R | **negative** |
-| `range_fade_v1` | Mean reversion, ADX < 20 | 6,033 | −0.027R | zero |
+| `range_fade_v1` | Mean reversion, ADX < 20 | 6,033 | −0.027R | zero (retired 2026-09-16: demo CI below zero) |
 | `donchian_breakout_v1` | 20-bar price-channel momentum, FX | 15,024 | −0.090R | **negative** |
 | `donchian_trending_v1` | Same logic, trending assets | 8,856 | −0.122R | **negative** |
-| `range_fade_h4_v1` | Same logic as `range_fade_v1`, at H4 | 5,715 | −0.042R | **negative** |
-| `london_breakout_crosses_v1` | Same logic as `london_breakout_v1`, 5 EUR/GBP/CHF/CAD crosses | 1,171 | −0.132R | **negative** (CI entirely below zero; failed its pre-registered screen) |
+| `range_fade_h4_v1` | Same logic as `range_fade_v1`, at H4 | 5,715 | −0.042R | **negative** (retired 2026-09-16) |
+| `london_breakout_crosses_v1` | Same logic as `london_breakout_v1`, 5 EUR/GBP/CHF/CAD crosses | 1,171 | −0.132R | **negative** (CI entirely below zero; failed its pre-registered screen; retired 2026-09-16) |
 | `london_breakout_wide_v1` | `london_breakout_v1` with a 1.75x compression limit | 2,129 | −0.052R | zero (v1 re-run same day: −0.060R over 1,070) |
 
 Six strategies, five mechanisms: `range_fade_h4_v1` and `donchian_trending_v1`
@@ -483,6 +501,33 @@ was ever claimed.
   of R each once made costs read 1.2R/trade (~20x reality). Fixed by flooring
   out stops that could never have been placed. Any future cost model must be
   checked at the *distribution*, not the average.
+
+## Candidates rejected before any code (2026-09-16)
+
+Looking for a replacement for the retired strategies, the two best-documented
+mechanisms not yet tried were checked against the literature first. Both failed
+the check, so neither was built.
+
+- **The overnight drift.** Boyarchenko, Larsen & Whelan (NY Fed Staff Report 917;
+  RFS 2023) found that US equity index futures earned their largest returns
+  between 2 and 3 a.m. ET, as European markets open: ~3.6% annualised over
+  1998-2019, strongest after US-session selloffs, explained by dealer inventory
+  risk. It was structural, specific and intraday (no swap). But the same authors'
+  follow-up, "The Disappearing Overnight Drift" (Liberty Street Economics, July
+  2026), reports that the window has **averaged close to zero since 2021**. Dead
+  after publication.
+- **Daily reversal in US equity indices** (the "buy the short-term dip" family,
+  e.g. RSI(2)). arXiv 2606.29591 (2026) finds SPY's lag-1 autocorrelation (-0.081,
+  z = -7.4) is **driven by magnitude, not direction**: the sign test gives p = 0.11,
+  consistent with bid-ask bounce and stale constituent prices. That is a
+  measurement artefact, not a tradeable direction, and a CFD priced off futures
+  lacks the stale-constituent part entirely. Its one directional result (lag 3,
+  p = 0.02) is a single test among many. Blog backtests showing high win rates on
+  SPY do not survive that decomposition.
+
+**The lesson for the next search:** a published anomaly is the most likely kind
+to have been traded away. Before building one, look for the authors' own
+follow-up and for a sign-versus-magnitude decomposition.
 
 ## What has NOT been tested
 

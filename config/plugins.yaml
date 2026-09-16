@@ -5,29 +5,27 @@
 broker: mt5             # implemented; connect() needs the MT5 terminal installed + logged in
 market_data: mt5        # implemented; same requirement
 strategies:
-  # All four run side by side on the demo lab and are judged independently -
-  # none waits for another. They are deliberately different MECHANISMS, not
-  # variants of one idea: testing 20 tweaks of a single idea and keeping the
-  # best is how you select noise and lose real money.
-  - ema_trend_v1          # MA-crossover trend-following (reference implementation)
+  # Each runs side by side on the demo lab and is judged independently - none
+  # waits for another. Testing 20 tweaks of a single idea and keeping the best
+  # is how you select noise and lose real money.
+  - ema_trend_v1          # MA-crossover trend-following (too few trades to judge yet)
   - london_breakout_v1    # scheduled volatility regime shift at the London open
-  # Two DEMO-ONLY extensions of london_breakout_v1, each moving exactly one thing
-  # so a result can be pinned on it (pre-registered in docs/research-log.md,
-  # 2026-09-16). Both load on the live engine too - plugins are global - but a
-  # new strategy is linked to a live account with enabled=false, so guard 3
-  # blocks them there until you deliberately switch one on.
-  - london_breakout_crosses_v1  # same logic, 5 EUR/GBP/CHF/CAD crosses it never traded
+  # DEMO-ONLY extension of london_breakout_v1 that moves exactly one thing
+  # (pre-registered in docs/research-log.md, 2026-09-16). It loads on the live
+  # engine too - plugins are global - but a new strategy is linked to a live
+  # account with enabled=false, so guard 3 blocks it there.
   - london_breakout_wide_v1     # same 16 symbols, compression limit 1.75x instead of 1.5x
-  - range_fade_v1         # mean reversion - the complement of ema_trend_v1 (ADX < 20)
-  # Same fade one scale up. range_fade_v1 has a REAL gross edge (+0.044R/trade,
-  # CI above zero) that its 0.066R costs consume. Cost-in-R falls as the stop
-  # grows, so H4 halves the drag. A cost test with no knobs of its own.
-  - range_fade_h4_v1
-  - donchian_breakout_v1  # price-channel momentum (different trigger to ema_trend_v1)
-  # Identical logic to donchian_breakout_v1, aimed at trending assets (metals,
-  # gas, BTC, EU indices). An out-of-sample test of "momentum works on trending
-  # assets, not on mean-reverting FX", not a new idea - it has no knobs of its own.
-  - donchian_trending_v1
+  #
+  # RETIRED - no longer loaded, so neither engine fetches prices for them.
+  # Each is still in engine/registry.py, so scripts/backtest.py can re-run it,
+  # and strategies.retired=true blocks it even if re-listed here. Their trades
+  # stay in the database; open positions are still managed and reconciled,
+  # because neither depends on this list. Why each went: docs/research-log.md.
+  #   donchian_breakout_v1       2026-08-30  demo CI entirely below zero
+  #   donchian_trending_v1       2026-08-30  falsified 0-for-8 out of sample
+  #   range_fade_v1              2026-09-16  demo CI entirely below zero (271 trades)
+  #   range_fade_h4_v1           2026-09-16  backtest CI below zero, demo drawdown past 15R
+  #   london_breakout_crosses_v1 2026-09-16  failed its pre-registered backtest screen
 risk_engine: default
 execution_engine: default
 news_provider: forexfactory  # free ForexFactory weekly economic calendar (no
