@@ -355,12 +355,48 @@ class MT5BrokerAdapter(BrokerAdapter):
             symbol=symbol,
             direction=direction,
             lot_size=lot_size,
-            entry_price=result.price,
+            entry_price=self._fill_price(result, price),
             stop_loss=stop_loss,
             take_profit=take_profit,
             status=PositionStatus.OPEN,
             opened_at=datetime.now(timezone.utc),
         )
+
+    def _fill_price(self, result, requested: float) -> float:
+        """The price an order that has ALREADY FILLED actually filled at.
+
+        result.price is not that on every server. The demo server returns the
+        fill there; the LIVE server returns 0.0. So every live trade was
+        recorded as opened at 0, its risk_amount came out ~2,400x too large
+        (|0 - stop| instead of |entry - stop|), each real stop-out read as ~0R,
+        and the OPEN alert said "@ 0". The broker's own SL/TP were right
+        throughout - only the record was wrong. Found 2026-09-16 on all 5 live
+        london_breakout_v1 trades, against 0 of ~100 demo trades on the same code.
+
+        A zero is therefore never trusted: ask the position, then the deal, and
+        only then fall back to the price we sent - which is off by at most the
+        slippage, not by the whole price.
+
+        Must never raise. The order is already filled by the time this runs, so
+        an exception here would report a real open position as a failed order,
+        and nothing would record it."""
+        if result.price and result.price > 0:
+            return float(result.price)
+        try:
+            positions = mt5.positions_get(ticket=result.order)
+            if positions and positions[0].price_open > 0:
+                return float(positions[0].price_open)
+            if getattr(result, "deal", 0):
+                deals = mt5.history_deals_get(ticket=result.deal)
+                if deals and deals[0].price > 0:
+                    return float(deals[0].price)
+        except Exception:
+            logger.exception("fill price lookup failed for order %s", result.order)
+        logger.warning(
+            "order %s: broker reported no fill price and none could be looked up - "
+            "recording the requested price %s", result.order, requested,
+        )
+        return float(requested)
 
     def modify_position(
         self,

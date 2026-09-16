@@ -313,6 +313,37 @@ direction + lot size at the *same* moment, this could misattribute which
 signal a recovered position belongs to. Not a concern at today's scale (one
 strategy, sequential evaluation), worth revisiting if that changes.
 
+## A filled order's price is not always in `result.price`
+
+Found 2026-09-16: all 5 live trades were recorded with `entry_price = 0`, while
+all ~100 demo trades on the same code were correct. `place_order()` recorded
+`order_send()`'s `result.price` as the entry. The demo server returns the fill
+there; the live server returns `0.0`.
+
+**Real money was never exposed.** The broker's SL/TP were set correctly, and
+stop management reads `price_open` from MT5's own positions, not from this
+record. What broke was the record: `risk_amount` came out as
+`|0 - stop| x value x lots`, about 2,400x too large ($8,139 instead of ~$3.60).
+Every live trade therefore read as ~0R (a -$4.20 stop-out as -0.0005R), which
+makes live performance unmeasurable. The live OPEN alerts also said "@ 0".
+
+Fixed in `MT5BrokerAdapter._fill_price()`: a zero is never trusted. It asks the
+position, then the deal, and only then falls back to the price that was sent,
+which is wrong by at most the slippage. It never raises, because the order has
+already filled and an exception would report a real position as a failed order.
+`EngineLoop._risk_amount()` also refuses an entry of 0 and records no R rather
+than a wrong one.
+
+The 5 saved rows are repaired by `scripts/repair_entry_prices.py`. It takes the
+entry from the broker's entry deal, and rebuilds `risk_amount` exactly from the
+value captured at open (`old_risk / stop` = value x lots). Proven by
+`scripts/test_fill_price.py` (17/17; 10/17 on the old code, which reproduces
+the $8,139.56 row exactly).
+
+**The lesson:** demo and live MT5 servers do not return the same fields. A
+result from one is not evidence about the other, so check the first real trade's
+recorded numbers, not just its alert.
+
 ## "Connected" meant "MT5.exe is running" - and the engine never checked which account it was on
 
 Found live on **2026-07-15**: 31 orders in a row refused by MT5 with retcode

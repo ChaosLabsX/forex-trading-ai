@@ -929,6 +929,14 @@ class EngineLoop:
         broker = self._engine.broker
         if broker is None or position.stop_loss is None:
             return None
+        if not position.entry_price or position.entry_price <= 0:
+            # No real price is zero. Computing from one gives |0 - stop|, a
+            # figure ~2,400x too large that silently turns every R into ~0 -
+            # which is what the live server's result.price = 0.0 did. No R is
+            # honest; a wrong R poisons the verdict. See MT5BrokerAdapter._fill_price.
+            logger.error("position %s has entry price %s - not computing risk from it",
+                         position.id, position.entry_price)
+            return None
         try:
             value_per_price = broker.get_price_value_per_lot(position.symbol)
         except Exception:
