@@ -9,7 +9,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     """Secrets and environment-specific values. Loaded from .env, never committed."""
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # utf-8-sig: the VPS .env is saved "UTF-8 with BOM" (PowerShell 5.1 writes
+    # one; Notepad keeps it). Read with the default encoding, the BOM glues onto
+    # the first name - "﻿TEST_MODE" - so the first line is silently ignored
+    # and its setting falls back to the default. utf-8-sig strips a BOM when
+    # present and reads plain UTF-8 unchanged. Found 2026-10-09; harmless until
+    # then only because the first line happened to equal its own default.
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8-sig", extra="ignore")
 
     test_mode: bool = True
 
