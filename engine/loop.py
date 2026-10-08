@@ -246,7 +246,9 @@ class EngineLoop:
             return
         if not (self._settings.live_trading_enabled or self._settings.ai_review_enabled):
             return
-        record = review_scoring.compute(self._supabase, self._account_key)
+        record = review_scoring.compute(
+            self._supabase, self._account_key, self._engine.ai_provider.model_name
+        )
         if record.scored != self._review_record.scored:
             logger.info(
                 "AI review record: %s scored (%s approved, %s rejected)",

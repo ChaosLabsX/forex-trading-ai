@@ -110,6 +110,19 @@ have turned out - but it is computed in code and never self-assessed, and it
 **withholds the numbers entirely** until both arms clear 30 trades. A reviewer
 told "your approvals run +0.4R" on eleven trades learns to approve.
 
+**The record is per model.** `compute()` takes the running provider's
+`model_name` and scores only that model's verdicts, so changing `MODEL` starts a
+fresh record at "not scored yet". It used to pool every model, which by the time
+of the Opus 5.5 switch (2026-10) meant Opus 4.8 (approved 93% of signals) and
+Opus 5 (56%) were being presented to the reviewer as one "your own track record".
+Older verdicts stay in `ai_reviews` under their own `model` label.
+
+**A reviewer outage is silent by design** - a failed review is logged
+(`AI review failed`) and the trade proceeds, because the review never gates. The
+cost of that design: when the Anthropic account ran out of credit (found
+2026-10-08), nothing announced it. Top-ups and low-balance alerts live in the
+Anthropic Console (Plans & Billing), not in this repo.
+
 ## RLS / dashboard security model
 
 The dashboard is a public static site using the Supabase **anon** key - there

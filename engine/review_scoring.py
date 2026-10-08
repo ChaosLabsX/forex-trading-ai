@@ -131,10 +131,17 @@ def _empty_stats() -> TradeStats:
 EMPTY_RECORD = ReviewRecord(scored=0, approved=_empty_stats(), rejected=_empty_stats())
 
 
-def compute(supabase: SupabaseClient, account_key: str) -> ReviewRecord:
-    """Join reviews to outcomes for one account. Never raises - a scoring failure
-    must not take down the trading loop, and an empty record degrades to 'no
-    verdict yet', which is the truthful thing to say when the join fails."""
+def compute(supabase: SupabaseClient, account_key: str, model: str) -> ReviewRecord:
+    """Join one model's reviews to outcomes for one account. Never raises - a
+    scoring failure must not take down the trading loop, and an empty record
+    degrades to 'no verdict yet', which is the truthful thing to say when the
+    join fails.
+
+    Scored per model because the record is shown to the reviewer as "your own
+    track record". Pooled, a newly installed model would be graded on its
+    predecessor's verdicts - and the pool already mixed two very different
+    reviewers: Opus 4.8 approved 93% of signals, Opus 5 56%. A new model
+    therefore starts at "not scored yet", which is the true statement."""
     try:
         trades = supabase.select(
             "trades",
@@ -174,6 +181,7 @@ def compute(supabase: SupabaseClient, account_key: str) -> ReviewRecord:
             "ai_reviews",
             {
                 "signal_id": f"in.({','.join(str(i) for i in ids)})",
+                "model": f"eq.{model}",
                 "select": "signal_id,approved",
             },
         )

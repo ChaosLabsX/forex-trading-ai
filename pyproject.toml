@@ -11,7 +11,9 @@ dependencies = [
     # runtime. The whole engine is Windows-only anyway (see PLAN.md), so this
     # isn't kept as an optional extra.
     "MetaTrader5>=5.0.45",
-    "anthropic>=0.40",
+    # >=0.120: has the parameters the Opus 5.5 review request uses (strict tools,
+    # output_config). <1: 1.x is a breaking major, to be upgraded deliberately.
+    "anthropic>=0.120,<1",
     # Verify TLS against the OS trust store instead of OpenSSL's bundled CAs.
     # Needed on the VPS: api.telegram.org's chain validates under Windows'
     # own verifier but not under Python's OpenSSL default context (alternate

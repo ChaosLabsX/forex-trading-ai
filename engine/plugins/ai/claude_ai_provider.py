@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import anthropic
 
 from engine.config import Settings
@@ -7,15 +9,32 @@ from engine.core.interfaces.ai_provider import AIProvider
 from engine.core.interfaces.strategy import StrategyContext
 from engine.core.models import AIVerdict, Signal
 
+logger = logging.getLogger("engine.ai.claude")
+
 # Opus for the review: this is a judgement call on a real trade, and the whole
 # point of shadow mode is to build a track record worth trusting later - a
 # cheaper model would make that record less meaningful. Reviews only run when a
 # signal actually fires (rare), so the cost is negligible.
-MODEL = "claude-opus-5"
+#
+# Changing this starts a new track record: review_scoring scores each model on
+# its own verdicts only, so the new reviewer is never shown its predecessor's
+# results as if they were its own.
+MODEL = "claude-opus-5-5"
+
+# Opus 5.5 defaults to "medium"; Opus 5 ran this review at "high", its default.
+# Pinned so the upgrade doesn't quietly lower the thinking behind a real-money
+# opinion. Cost is not the constraint here - reviews fire a few times a week.
+EFFORT = "high"
+
+# A missing verdict is retried once (see review_signal), then given up on.
+ATTEMPTS = 2
 
 _VERDICT_TOOL = {
     "name": "submit_verdict",
     "description": "Submit your risk assessment of this candidate trade signal.",
+    # Opus 5.5 rejects a forced tool_choice, so the call is requested in the
+    # prompt instead; strict keeps the arguments to this schema when it comes.
+    "strict": True,
     "input_schema": {
         "type": "object",
         "properties": {
@@ -33,6 +52,7 @@ _VERDICT_TOOL = {
             },
         },
         "required": ["approved", "confidence", "rationale"],
+        "additionalProperties": False,
     },
 }
 
@@ -54,25 +74,47 @@ class ClaudeAIProvider(AIProvider):
     def review_signal(
         self, signal: Signal, context: StrategyContext, track_record: str | None = None
     ) -> AIVerdict:
-        response = self._client.messages.create(
-            model=MODEL,
-            # The verdict itself is tiny (~150 tokens), but Opus 5 thinks by default
-            # and thinking is billed against max_tokens. At the old 512 the reasoning
-            # ate the whole budget and no tool_use block came back, i.e. every review
-            # failed. 8000 leaves room to reason and still caps a runaway response.
-            max_tokens=8000,
-            tools=[_VERDICT_TOOL],
-            tool_choice={"type": "tool", "name": "submit_verdict"},
-            messages=[
-                {"role": "user", "content": self._build_prompt(signal, context, track_record)}
-            ],
-        )
-        tool_use = next(block for block in response.content if block.type == "tool_use")
-        return AIVerdict(
-            approved=bool(tool_use.input["approved"]),
-            confidence=float(tool_use.input["confidence"]),
-            rationale=str(tool_use.input["rationale"]),
-        )
+        """Raises when no verdict comes back. The caller logs that and moves on;
+        a missing review never touches the trade, which has already been decided.
+
+        No refusal fallback to another model, deliberately. A decline here costs
+        one missing log row, while a fallback would put a different model's
+        opinion under this model's name in the record being scored."""
+        prompt = self._build_prompt(signal, context, track_record)
+        for attempt in range(1, ATTEMPTS + 1):
+            response = self._client.messages.create(
+                model=MODEL,
+                # Thinking is always on for Opus 5.5 and counts against
+                # max_tokens. The verdict itself is ~150 tokens; this leaves room
+                # to reason and still caps a runaway response. (At 512 under Opus
+                # 5, the thinking ate the whole budget and every review failed.)
+                max_tokens=16000,
+                output_config={"effort": EFFORT},
+                tools=[_VERDICT_TOOL],
+                tool_choice={"type": "auto"},
+                messages=[{"role": "user", "content": prompt}],
+            )
+            if response.stop_reason == "refusal":
+                details = response.stop_details
+                raise RuntimeError(
+                    f"{MODEL} declined to review {signal.symbol} "
+                    f"(category {getattr(details, 'category', None)})"
+                )
+            tool_use = next(
+                (b for b in response.content if b.type == "tool_use" and b.name == _VERDICT_TOOL["name"]),
+                None,
+            )
+            if tool_use is not None:
+                return AIVerdict(
+                    approved=bool(tool_use.input["approved"]),
+                    confidence=float(tool_use.input["confidence"]),
+                    rationale=str(tool_use.input["rationale"]),
+                )
+            logger.warning(
+                "%s gave no verdict for %s (attempt %d/%d, stop_reason=%s)",
+                MODEL, signal.symbol, attempt, ATTEMPTS, response.stop_reason,
+            )
+        raise RuntimeError(f"{MODEL} gave no verdict for {signal.symbol} after {ATTEMPTS} attempts")
 
     @staticmethod
     def _build_prompt(
@@ -115,4 +157,5 @@ Account/risk context:
 - Consecutive losing trades today: {account.consecutive_stop_losses_today}
 
 Assess whether this specific trade looks reasonable given the technical
-rationale and current account risk state, then call submit_verdict."""
+rationale and current account risk state, then give your verdict by calling
+submit_verdict."""
