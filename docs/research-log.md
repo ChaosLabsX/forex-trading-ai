@@ -12,6 +12,48 @@ commission), entries filled at the next bar's open, and judged by a bootstrap
 Six strategies, five mechanisms, ~37,000 simulated trades, 3-12.7 years of real
 history per instrument. Not one produced an edge that survives retail costs.
 
+## 2026-10-12 - The backtest now manages stops like the engine. Prediction, before the run
+
+Written before the corrected backtest has been run on real history.
+
+**What was wrong.** The engine moves a stop to entry once a trade is +1R in
+profit (`breakeven_at_r`), and trails it past +2R. `scripts/backtest.py` held
+every stop fixed. So every backtest number in this log measured exits that no
+live or demo trade has had. On demo, 9 of `london_breakout_v1`'s 63 trades (14%)
+ended at a stop moved to entry - an outcome the backtest could not produce.
+Found when a live CHFJPY short reached +1R, came back, and closed at entry.
+
+**The fix.** `simulate_outcome()` now drives the engine's own
+`DefaultExecutionEngine` bar by bar: the stop is managed once per H1 bar, after
+the bar's worst price, and a bar that closes beyond the new stop exits there.
+The fixed model is kept and printed beside it on the same signals, so the
+results above stay comparable; it is identical to the old function on
+20,000/20,000 random paths. `scripts/test_backtest_exits.py` pins both.
+
+**This is a measurement fix, not a variant.** Nothing about any strategy or
+the engine changes. It makes the screen describe what actually trades. Exit
+variants (closing half at +1R, a stop at +0.5R, ...) are still barred by the
+standing rule until a strategy passes its screen.
+
+**What to expect from bar order alone.** On a no-edge random walk with a 1.5R
+target, fixed scores -0.009R and managed -0.029R: the conservative bar order
+(worst price first) costs the managed model ~0.02R by itself. In continuous
+time a stop moved on a no-edge path changes nothing in expectation, so ~-0.02R
+is the noise line. A gap far from it means the price paths after +1R are not
+random.
+
+**Prediction for `london_breakout_v1`** (last fixed run: -0.060R over 1,070):
+- the same signals, so the same trade count under both models;
+- 10-20% of trades end at the moved stop (demo 14%, random walk 19%);
+- managed expectancy = fixed - 0.02R, within +/-0.03R;
+- fewer full losses and a smaller max drawdown under managed;
+- the verdict does not change: no edge, CI not above zero.
+
+If managed comes in clearly above fixed - 0.02R, prices tend to fall back after
++1R and the move to entry is worth keeping. Clearly below, they tend to carry
+on, and the move is costing winners. Either result is recorded here; neither
+licenses tuning `breakeven_at_r` until the strategy itself passes.
+
 ## 2026-09-16 - Pre-registered: two `london_breakout_v1` extensions, demo only
 
 Written before either strategy produced a single trade or a backtest.

@@ -14,6 +14,15 @@ engine/loop.py's CANDLE_COUNT), then simulates each fired signal forward to see
 whether its stop-loss or take-profit would have been hit first - now with
 transaction costs, realistic fills, and proper statistics.
 
+Open trades are managed the way the engine manages them: the stop moves to
+entry at +1R (and trails past +2R), driven by the engine's own
+DefaultExecutionEngine with the same Settings. Until 2026-10-12 the backtest
+held every stop fixed, so it tested a strategy that wasn't the one trading - on
+demo, 14% of london_breakout_v1's trades ended at a stop moved to entry, an
+outcome the backtest could not produce. Both models are printed: managed (the
+headline, what really trades) and fixed (comparable with every result recorded
+in docs/research-log.md before that date).
+
 What makes this more than the old sanity check:
   - Transaction costs modelled from live MT5 symbol info (spread) plus an
     assumed commission, deducted from every trade in R terms. Ignoring costs is
@@ -41,7 +50,7 @@ from __future__ import annotations
 import statistics
 import sys
 from bisect import bisect_right
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import MetaTrader5 as mt5
@@ -50,8 +59,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from engine.config import Settings
 from engine.core.interfaces.strategy import StrategyContext, StrategyPlugin
-from engine.core.models import AccountState, Direction, Timeframe
+from engine.core.models import AccountState, Direction, Position, PositionStatus, Tick, Timeframe
 from engine.plugins.brokers.mt5_broker import MT5BrokerAdapter
+from engine.plugins.execution.default_execution_engine import DefaultExecutionEngine
 from engine.plugins.market_data.mt5_market_data import MT5MarketDataProvider
 from engine.registry import PLUGIN_REGISTRY, load_plugin
 from engine.stats import bootstrap_expectancy_ci, longest_losing_streak, max_drawdown_r
@@ -109,11 +119,19 @@ class TradeOutcome:
     entry_price: float
     stop_loss: float
     take_profit: float
-    result: str  # "win" | "loss" | "timeout"
+    result: str  # "win" | "loss" | "moved_stop" | "timeout"
     gross_r: float  # R before costs
     net_r: float  # R after spread + commission
     cost_r: float  # what costs took, so the model stays auditable
     risk_price: float
+    # The same trade with the stop held fixed - the model used before
+    # 2026-10-12, kept so the two can be compared on identical signals.
+    fixed_result: str = ""
+    fixed_gross_r: float = 0.0
+
+    def as_fixed(self) -> "TradeOutcome":
+        return replace(self, result=self.fixed_result, gross_r=self.fixed_gross_r,
+                       net_r=self.fixed_gross_r - self.cost_r)
 
 
 def resolve_costs(symbol: str) -> SymbolCosts:
@@ -173,39 +191,100 @@ def cost_in_r(costs: SymbolCosts, risk_price: float) -> float:
     return spread_r + commission_r
 
 
+class _PaperBroker:
+    """Just enough of BrokerAdapter for DefaultExecutionEngine to move a stop.
+    The backtest never places an order; a "modify" here only updates the copy
+    of the position the simulation is walking forward."""
+
+    current: Position
+
+    def modify_position(self, position_id, stop_loss=None, take_profit=None):
+        return self.current if stop_loss is None else replace(self.current, stop_loss=stop_loss)
+
+
+class StopManager:
+    """The engine's own stop management, driven bar by bar.
+
+    Uses DefaultExecutionEngine.manage_open_position - not a copy of its rules -
+    so the backtest moves a stop exactly when, and to exactly where, the engine
+    would: breakeven at Settings.breakeven_at_r, trailing past trail_start_r,
+    never by less than MIN_STEP_R, never loosened."""
+
+    def __init__(self, settings: Settings) -> None:
+        self._engine = DefaultExecutionEngine(settings)
+        self._broker = _PaperBroker()
+        self._next_id = 0
+
+    def open(self, direction: Direction, entry: float, stop: float, target: float) -> Position:
+        self._next_id += 1  # fresh id: the engine caches each position's initial risk by id
+        return Position(f"bt-{self._next_id}", "", direction, 0.0, entry, stop, target,
+                        PositionStatus.OPEN, None)
+
+    def stop_after(self, position: Position, price: float) -> float:
+        """Where the engine would put the stop having seen `price`."""
+        self._broker.current = position
+        tick = Tick(position.symbol, None, price, price)
+        updated = self._engine.manage_open_position(position, tick, self._broker)
+        return position.stop_loss if updated is None else updated.stop_loss
+
+
 def simulate_outcome(
     direction: Direction,
     entry_price: float,
     stop_loss: float,
     take_profit: float,
     future_bars,
+    manager: StopManager | None = None,
 ) -> tuple[str, float]:
     """Gross R (before costs) walking H1 bars forward from the entry.
 
-    Conservative on intrabar order: if a single bar touches both stop and
-    target, the stop is assumed to fill first. Timeouts mark to the last bar's
-    close rather than being discarded - a trade left open for 8 days isn't a
-    free scratch, it carries whatever P&L it had."""
+    Each bar is read as open -> worst price -> best price -> close. That order is
+    the conservative one: if a single bar touches both stop and target, the stop
+    fills first. Timeouts mark to the last bar's close rather than being
+    discarded - a trade left open for 8 days isn't a free scratch, it carries
+    whatever P&L it had.
+
+    With a manager the stop is managed as the engine manages it: having seen the
+    bar's best price, the engine may move the stop (to entry at +1R). The move
+    counts from that point on - for the rest of the bar (if it closes beyond the
+    new stop, the stop was hit on the way there) and for every later bar. Without
+    one, the stop stays where the strategy put it, as before 2026-10-12."""
     risk = abs(entry_price - stop_loss)
     if risk <= 0:
         return "loss", -1.0
+    is_long = direction == Direction.LONG
+    position = manager.open(direction, entry_price, stop_loss, take_profit) if manager else None
+    stop = stop_loss
+
+    def stopped_out() -> tuple[str, float]:
+        if stop == stop_loss:
+            return "loss", -1.0
+        signed = (stop - entry_price) if is_long else (entry_price - stop)
+        return "moved_stop", signed / risk
+
     last_close = entry_price
     for bar in future_bars[:MAX_HOLD_BARS]:
         last_close = bar.close
-        hit_stop = bar.low <= stop_loss if direction == Direction.LONG else bar.high >= stop_loss
-        hit_target = bar.high >= take_profit if direction == Direction.LONG else bar.low <= take_profit
-        if hit_stop:
-            return "loss", -1.0
-        if hit_target:
+        worst, best = (bar.low, bar.high) if is_long else (bar.high, bar.low)
+        if (worst <= stop) if is_long else (worst >= stop):
+            return stopped_out()
+        if (best >= take_profit) if is_long else (best <= take_profit):
             reward = abs(take_profit - entry_price)
             return "win", reward / risk
+        if manager is not None:
+            new_stop = manager.stop_after(position, best)
+            if new_stop != stop:
+                stop = new_stop
+                position = replace(position, stop_loss=stop)
+                if (bar.close <= stop) if is_long else (bar.close >= stop):
+                    return stopped_out()
     # never resolved: mark to market at the last close we saw
-    signed = (last_close - entry_price) if direction == Direction.LONG else (entry_price - last_close)
+    signed = (last_close - entry_price) if is_long else (entry_price - last_close)
     return "timeout", signed / risk
 
 
 def run_backtest_for_symbol(
-    strategy: StrategyPlugin, md: MT5MarketDataProvider, symbol: str
+    strategy: StrategyPlugin, md: MT5MarketDataProvider, symbol: str, manager: StopManager
 ) -> list[TradeOutcome]:
     # Timeframes come from the STRATEGY, never hardcoded here. The previous
     # version fetched H1+H4 regardless of what was asked for, so a strategy
@@ -285,8 +364,12 @@ def run_backtest_for_symbol(
             untradeable += 1
             continue
 
+        future = entry_all[i + 2 :]
         result, gross_r = simulate_outcome(
-            signal.direction, entry_fill, signal.stop_loss, signal.take_profit, entry_all[i + 2 :]
+            signal.direction, entry_fill, signal.stop_loss, signal.take_profit, future, manager
+        )
+        fixed_result, fixed_gross_r = simulate_outcome(
+            signal.direction, entry_fill, signal.stop_loss, signal.take_profit, future
         )
         cost_r = cost_in_r(costs, risk_price)
         outcomes.append(
@@ -302,6 +385,8 @@ def run_backtest_for_symbol(
                 net_r=gross_r - cost_r,
                 cost_r=cost_r,
                 risk_price=risk_price,
+                fixed_result=fixed_result,
+                fixed_gross_r=fixed_gross_r,
             )
         )
     if untradeable:
@@ -322,8 +407,9 @@ def summarize(label: str, outcomes: list[TradeOutcome]) -> None:
         return
     wins = [o for o in outcomes if o.result == "win"]
     losses = [o for o in outcomes if o.result == "loss"]
+    moved = [o for o in outcomes if o.result == "moved_stop"]
     timeouts = [o for o in outcomes if o.result == "timeout"]
-    resolved = len(wins) + len(losses)
+    resolved = len(wins) + len(losses) + len(moved)
     win_rate = (len(wins) / resolved * 100) if resolved else 0.0
 
     net_rs = [o.net_r for o in outcomes]
@@ -353,8 +439,9 @@ def summarize(label: str, outcomes: list[TradeOutcome]) -> None:
     )
 
     print(f"{label}:")
-    print(f"  trades           {n}  ({len(wins)}W / {len(losses)}L / {len(timeouts)} timeout)")
-    print(f"  win rate         {win_rate:.1f}%  (of resolved)")
+    moved_text = f" / {len(moved)} at moved stop" if moved else ""
+    print(f"  trades           {n}  ({len(wins)}W / {len(losses)}L{moved_text} / {len(timeouts)} timeout)")
+    print(f"  win rate         {win_rate:.1f}%  (target hits, of resolved)")
     print(f"  total R          gross {gross_total:+.2f}   net {net_total:+.2f}   (costs cut {gross_total - net_total:.2f}R)")
     print(f"  expectancy       {expectancy:+.3f} R/trade")
     print(f"  avg win / loss   {avg_win:+.2f}R / {avg_loss:+.2f}R")
@@ -401,6 +488,7 @@ def main() -> None:
     # drift out of sync with what actually trades.
     strategy = load_plugin("strategy", key, settings)
 
+    manager = StopManager(settings)
     broker = MT5BrokerAdapter(settings)
     broker.connect()  # blank MT5_LOGIN -> read-only attach, no session bump
     md = MT5MarketDataProvider(settings)
@@ -453,7 +541,7 @@ def main() -> None:
     print("Per-instrument (net of costs):\n")
     for symbol in symbols:
         try:
-            outcomes = run_backtest_for_symbol(strategy, md, symbol)
+            outcomes = run_backtest_for_symbol(strategy, md, symbol, manager)
         except Exception as exc:
             # One unavailable symbol must not sink the whole screening run.
             print(f"{symbol}: skipped ({type(exc).__name__}: {exc})\n")
@@ -478,7 +566,21 @@ def main() -> None:
     # trades to be judged can never earn a READY verdict, however good it looks.
     print(f"Trade rate: {per_year:.0f}/year  ->  ~{100 / per_year:.1f} years to reach 100 live trades\n")
 
+    print(f"Stop management (as the engine trades): stop to entry at +{settings.breakeven_at_r:g}R, "
+          f"trailing {settings.trail_distance_r:g}R behind past +{settings.trail_start_r:g}R"
+          f"{'' if settings.trail_enabled else '  [DISABLED in Settings - stops held fixed]'}\n")
     summarize("ALL INSTRUMENTS", all_outcomes)
+
+    # The same signals with every stop held where the strategy put it: the model
+    # behind every backtest number recorded before 2026-10-12. Same trades, same
+    # costs - the only difference is what happens once the stop could move.
+    fixed = [o.as_fixed() for o in all_outcomes]
+    summarize("ALL INSTRUMENTS, stops held FIXED (the pre-2026-10-12 model)", fixed)
+    differ = sum(1 for o in all_outcomes if o.result != o.fixed_result)
+    managed_e = sum(o.net_r for o in all_outcomes) / len(all_outcomes)
+    fixed_e = sum(o.net_r for o in fixed) / len(fixed)
+    print(f"Managed vs fixed: {differ} of {len(all_outcomes)} trades end differently; "
+          f"expectancy {managed_e:+.3f}R vs {fixed_e:+.3f}R ({managed_e - fixed_e:+.3f}R per trade)\n")
 
     mid = len(all_outcomes) // 2
     print("Chronological stability (does the edge persist across time?):\n")
@@ -489,6 +591,7 @@ def main() -> None:
     print("  - Costs use a live spread SNAPSHOT; real spreads widen at news/rollover.")
     print("  - Commission is an assumption (COMMISSION_PER_LOT_ROUNDTURN) - set it to your schedule.")
     print("  - Intrabar order is unknown; same-bar stop+target counts as a loss (conservative).")
+    print("  - Stops are managed once per H1 bar, after its worst price; the engine checks every 5s.")
     print("  - One broker, one account, one historical path. Demo spreads differ from live.")
     print("  - Parameters were NOT optimised here, but this is still in-sample, not walk-forward.")
     print("  - A positive, tight, above-zero CI means 'worth forward-testing', not 'guaranteed'.")
