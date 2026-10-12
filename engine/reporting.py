@@ -163,16 +163,20 @@ def execution_failed(signal, strategy: str, account: str, reason: str) -> str:
 def stop_protected(position, strategy: str, account: str) -> str:
     """Sent ONCE per trade, the moment its stop reaches entry.
 
-    That instant is the only one worth pushing: the trade can no longer lose.
-    Every later trailing step is real but incremental - a runner to +3R fired
+    That instant is the only one worth pushing: from here the trade can't lose
+    on price. It can still close slightly negative - the broker's commission is
+    charged on every trade, win or lose, so a stop-out at entry nets minus the
+    fees (a 0.03-lot CHFJPY scratch on 2026-10-12: $0.00 on price, -$0.22 in
+    commission). This said "RISK-FREE ... can no longer lose" until then, which
+    promised more than a stop at entry delivers. Every later trailing step is real but incremental - a runner to +3R fired
     four near-identical alerts, none of them actionable. Those are logged
     instead. And the strategy name is here because two strategies can now hold
     the same symbol independently, so "GBPUSD" alone is ambiguous."""
     return _line(
         "🛡",
-        f"RISK-FREE  ·  {position.symbol} {position.direction.value}",
+        f"BREAKEVEN  ·  {position.symbol} {position.direction.value}",
         f"{strategy}  ·  {account}",
-        f"stop at entry {price(position.stop_loss, position.entry_price)}  ·  can no longer lose",
+        f"stop at entry {price(position.stop_loss, position.entry_price)}  ·  worst case now: just the fees",
     )
 
 

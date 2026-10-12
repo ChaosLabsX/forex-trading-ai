@@ -527,7 +527,8 @@ while a position is open, called every `MANAGE_INTERVAL_SECONDS` (5s) by the
 loop's `_manage_open_positions()`:
 
 - at `breakeven_at_r` (default 1.0R) profit, the stop moves to entry - the trade
-  can no longer become a loss;
+  can no longer lose on price, though a stop-out there still nets minus the
+  commission (Telegram says "BREAKEVEN ... worst case now: just the fees");
 - past `trail_start_r` (default 2.0R), the stop trails `trail_distance_r`
   (default 1.0R) behind price.
 

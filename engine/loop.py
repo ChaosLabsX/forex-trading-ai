@@ -657,7 +657,8 @@ class EngineLoop:
 
     @staticmethod
     def _is_protected(position: Position) -> bool:
-        """Stop at or beyond entry - the trade can no longer lose."""
+        """Stop at or beyond entry - the trade can no longer lose on price
+        (commission is still charged, so a stop-out here nets minus the fees)."""
         if position.stop_loss is None:
             return False
         if position.direction == Direction.LONG:
@@ -677,10 +678,10 @@ class EngineLoop:
             "stop moved: %s %s (%s) -> %s", strategy, after.symbol, after.id, after.stop_loss
         )
 
-        # Push ONCE per trade - when it first becomes risk-free. Later trailing
+        # Push ONCE per trade - when its stop first reaches entry. Later trailing
         # steps are real but incremental: a runner to +3R fired four near
         # -identical alerts, none of which asked anything of you. Those live in
-        # the log now. The crossing into "cannot lose" is the one that matters.
+        # the log now. The crossing to breakeven is the one that matters.
         if self._is_protected(after) and not self._is_protected(before):
             _notify_all(
                 self._engine,
