@@ -14,13 +14,20 @@ A single `while True` loop, `POLL_INTERVAL_SECONDS = 2`:
    every tick.
 2. **`_process_commands()`** - polls the `commands` table for `status=pending`
    rows, handles `pause`/`resume`/`emergency_close_all`, marks each row
-   `processed`. Runs every tick (2s) once connected.
+   `processed`. Once connected: every 2s on a live account holding a position,
+   every 10s on a flat live account, every 15s on the demo lab
+   (`command_poll_interval`). "Flat" is believed only when a position read came
+   back empty; a failed read counts as holding.
 3. **`_send_heartbeat()`** - every 60s, inserts a row into `engine_heartbeats`
    (status, broker_connected). The dashboard's "Engine Health" card considers a
    heartbeat older than 3 minutes stale.
 4. **`_refresh_market_data_and_evaluate()`** - every 60s: fetches H1/H4/D1
-   candles for each configured instrument, upserts them to `candles`
-   (idempotent on `symbol,timeframe,time`), then runs strategy evaluation.
+   candles for each configured instrument and runs strategy evaluation. The
+   demo lab alone then stores the newly CLOSED bars in `candles`, all of a
+   pass's in one upsert (idempotent on `symbol,timeframe,time`) - normally one
+   request an hour. Nothing reads `candles` back; it is an archive. It used to
+   be one upsert per symbol and timeframe every minute on both engines, the
+   still-forming bar included: ~140,000 requests a day.
 
 ### Why candles are trimmed before indicators ever see them
 

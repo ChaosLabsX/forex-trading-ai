@@ -55,8 +55,10 @@ config/plugins.yaml  which plugin backs each subsystem (not secret, committed)
    client-side every ~15s) and writes manual commands (pause, resume,
    emergency-close-all) to a `commands` table. The engine polls that table on
    its existing 2-second tick - not a Supabase Realtime subscription as
-   originally planned; polling on an already-existing tick was simpler with no
-   meaningful latency cost here.
+   originally planned. Since 2026-10 it polls every 2s only on a live account
+   holding a position (where close-all protects money), every 10s on a flat
+   live account and every 15s on the demo lab: Supabase logs every request, and
+   polling every 2s on both engines was a large part of a log quota overrun.
 
 Currently runs locally on a Windows dev machine (MT5 terminal + Python engine
 side by side, engine launched as a detached background process); VPS

@@ -43,6 +43,16 @@ CANDLE_COUNT = {Timeframe.H1: 300, Timeframe.H4: 250, Timeframe.D1: 90}
 
 POLL_INTERVAL_SECONDS = 2
 HEARTBEAT_INTERVAL_SECONDS = 60
+# Dashboard commands (pause / resume / emergency close-all). Every poll is an
+# HTTP request, and Supabase logs every request: polling every 2s on both
+# engines was ~86,000 requests a day, a large share of the log ingestion that
+# took the free plan to 4x its 1 GB quota (2026-10). The poll is only urgent when
+# a button could protect money, so:
+COMMAND_POLL_SECONDS = 2  # live account holding a position: close-all as fast as ever
+COMMAND_POLL_FLAT_SECONDS = 10  # live account, nothing open: only "pause" can matter
+COMMAND_POLL_LAB_SECONDS = 15  # demo lab: no real money behind any button
+# Rows per candles upsert; the first pass after a start sends whole windows.
+CANDLE_PERSIST_CHUNK = 1000
 CANDLE_REFRESH_INTERVAL_SECONDS = 60
 # Trailing/breakeven stops react to intra-minute price, so manage open
 # positions far more often than the 60s candle cycle (but not every 2s tick -
@@ -52,6 +62,26 @@ RECONNECT_BACKOFF_SECONDS = (5, 10, 30, 60)
 # The daily digest only fires inside this window after its scheduled time, so a
 # restart later in the day can't resend it.
 DAILY_SUMMARY_WINDOW_MINUTES = 30
+
+
+def command_poll_interval(is_lab: bool, flat: bool) -> int:
+    """Seconds between dashboard-command polls. `flat` must be True only when a
+    position read actually came back empty - unknown counts as holding, so the
+    live account's close-all never slows down on a guess."""
+    if is_lab:
+        return COMMAND_POLL_LAB_SECONDS
+    return COMMAND_POLL_FLAT_SECONDS if flat else COMMAND_POLL_SECONDS
+
+
+def candles_to_persist(candles: list[Candle], mark: datetime | None) -> list[Candle]:
+    """The CLOSED candles newer than `mark` (the newest one already stored).
+
+    Never the still-forming bar. It used to be re-sent every 60s so the stored
+    copy would track it - one request per symbol and timeframe a minute, 48 a
+    minute per engine, for a table nothing reads back. A closed bar is final, so
+    each is now stored once, the pass after it closes."""
+    closed = candles[:-1]
+    return closed if mark is None else [c for c in closed if c.time > mark]
 
 
 def _closed_only(candles: list[Candle]) -> list[Candle]:
@@ -98,6 +128,10 @@ class EngineLoop:
         self._connected = False
         self._backoff_index = 0
         self._last_heartbeat = 0.0
+        self._last_command_poll = 0.0
+        # True only once a position read has come back empty - see
+        # command_poll_interval. Starts False: unknown is treated as holding.
+        self._flat = False
         self._last_candle_refresh = 0.0
         self._last_manage = 0.0
         self._last_evaluation = 0.0
@@ -115,13 +149,12 @@ class EngineLoop:
         self._logged_blocks: dict[str, str] = {}
         # broker ticket -> owning strategy, refreshed each cycle from `trades`
         self._ticket_owner: dict[str, str] = {}
-        # (symbol, timeframe) -> time of the newest candle already persisted.
-        # Upserting the full window every 60s re-wrote ~16,000 identical rows
-        # a minute (300 H1 + 250 H4 + 90 D1 per symbol, ~25 symbols); after the
-        # first full pass only the still-forming bar and any newly closed bars
-        # have changed, so only candles >= this mark are sent. In-memory on
-        # purpose: a restart just repeats one full upsert per symbol/timeframe,
-        # which doubles as gap backfill for however long the engine was down.
+        # (symbol, timeframe) -> time of the newest CLOSED candle already stored.
+        # Only the demo lab stores candles (the live engine would write the same
+        # rows again), only closed bars, and all of a pass's new bars in one
+        # request - normally one an hour. In-memory on purpose: a restart sends
+        # the closed windows once more, which doubles as gap backfill for
+        # however long the engine was down.
         self._last_persisted_bar: dict[tuple[str, Timeframe], datetime] = {}
         # Symbols this account's server does not carry - see _skip_unavailable.
         self._unavailable_instruments: set[str] = set()
@@ -205,9 +238,10 @@ class EngineLoop:
 
     def _tick(self) -> None:
         self._ensure_connected()
-        if self._connected:
-            self._process_commands()
         now = time.monotonic()
+        if self._connected and now - self._last_command_poll >= command_poll_interval(self._is_lab(), self._flat):
+            self._process_commands()
+            self._last_command_poll = now
         if self._connected and now - self._last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
             self._send_heartbeat()
             self._last_heartbeat = now
@@ -413,6 +447,9 @@ class EngineLoop:
             except Exception:
                 logger.exception("failed to fetch upcoming news events")
 
+        persist = self._is_lab()
+        pending_rows: list[dict] = []
+        pending_marks: dict[tuple[str, Timeframe], datetime] = {}
         for symbol in self._instruments:
             if symbol in self._unavailable_instruments:
                 continue
@@ -422,23 +459,17 @@ class EngineLoop:
                     candles = market_data.get_candles(symbol, timeframe, CANDLE_COUNT[timeframe])
                     if not candles:
                         continue
-                    # Persist only what can have changed since the last pass:
-                    # the still-forming bar plus any bars that closed since.
-                    # First pass after a start has no mark and sends the full
-                    # window - that is also what backfills a gap after downtime.
-                    mark = self._last_persisted_bar.get((symbol, timeframe))
-                    to_persist = candles if mark is None else [c for c in candles if c.time >= mark]
-                    if to_persist:
-                        self._supabase.upsert(
-                            "candles",
-                            [_candle_row(c) for c in to_persist],
-                            on_conflict="symbol,timeframe,time",
-                        )
-                    # Advance the mark only after a successful upsert, so a
-                    # failed write is retried next cycle instead of skipped.
-                    self._last_persisted_bar[(symbol, timeframe)] = candles[-1].time
+                    # Queue the newly closed bars; they are written in one batch
+                    # after the loop (see _persist_candles).
+                    to_persist: list[Candle] = []
+                    if persist:
+                        key = (symbol, timeframe)
+                        to_persist = candles_to_persist(candles, self._last_persisted_bar.get(key))
+                        if to_persist:
+                            pending_rows.extend(_candle_row(c) for c in to_persist)
+                            pending_marks[key] = to_persist[-1].time
                     logger.info(
-                        "refreshed %s %s: %d candles (%d persisted)",
+                        "refreshed %s %s: %d candles (%d to store)",
                         symbol, timeframe.value, len(candles), len(to_persist),
                     )
                     candles_by_timeframe[timeframe] = _closed_only(candles)
@@ -465,6 +496,25 @@ class EngineLoop:
                 self._evaluate_strategies(
                     symbol, candles_by_timeframe, account_state, open_positions, upcoming_news
                 )
+
+        self._persist_candles(pending_rows, pending_marks)
+
+    def _persist_candles(self, rows: list[dict], marks: dict) -> None:
+        """Store a pass's newly closed candles. Marks advance only once every
+        chunk is written, so a failed write is simply retried next pass (the
+        upsert makes a repeat harmless). Never raises - an archive write must
+        not cost a trading cycle."""
+        if not rows:
+            return
+        try:
+            for start in range(0, len(rows), CANDLE_PERSIST_CHUNK):
+                self._supabase.upsert(
+                    "candles", rows[start : start + CANDLE_PERSIST_CHUNK], on_conflict="symbol,timeframe,time"
+                )
+        except Exception:
+            logger.exception("failed to store %d candles - will retry next pass", len(rows))
+            return
+        self._last_persisted_bar.update(marks)
 
     def _note_block(self, where: str, exc: Exception) -> None:
         """Announce a provider-wide stall once per state change, not once per cycle.
@@ -624,7 +674,11 @@ class EngineLoop:
 
         try:
             positions = broker.get_open_positions()
+            self._flat = not positions
         except MarketDataUnavailable as exc:
+            # self._flat is left as it was: positions cannot change while the
+            # market is shut, which is the only time this fires.
+            #
             # The same unmeasurable clock as the evaluation path, reached by a
             # different road: _to_position() stamps opened_at with the broker's
             # offset, so merely READING positions fails on a market that has not
@@ -638,6 +692,7 @@ class EngineLoop:
             self._note_block("stop management", exc)
             return
         except Exception:
+            self._flat = False  # unknown counts as holding: keep close-all fast
             logger.exception("failed to fetch open positions for stop management")
             return
 
