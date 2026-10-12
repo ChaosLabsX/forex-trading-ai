@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { supabase } from "./supabase";
+import { usePolling } from "./usePolling";
 import type { Account, Heartbeat, Signal, Trade } from "../types";
 
 const POLL_MS = 15_000;
@@ -77,11 +78,7 @@ export function useDashboardData() {
     setUpdatedAt(new Date());
   }, []);
 
-  useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, POLL_MS);
-    return () => clearInterval(interval);
-  }, [refresh]);
+  usePolling(refresh, POLL_MS);
 
   return { accounts, health, openTrades, closedTrades, signals, loading, updatedAt, refresh };
 }

@@ -1,8 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { supabase } from "./supabase";
+import { usePolling } from "./usePolling";
 import type { Account, Readiness, Strategy, StrategyAccount, StrategyEvaluation, Trade } from "../types";
 
-const POLL_MS = 30_000;
+// Evaluations change every 30 min and trades close a few times a day; this
+// used to re-pull up to 1,500 rows every 30s. Toggles still refresh at once
+// (components call refresh() after a change).
+const POLL_MS = 5 * 60_000;
 
 const RANK: Record<Readiness, number> = { ready: 2, almost_ready: 1, not_ready: 0 };
 
@@ -177,7 +181,9 @@ export function useStrategyLab() {
         .from("strategy_evaluations")
         .select("*")
         .order("computed_at", { ascending: false })
-        .limit(500),
+        // Only the newest row per (strategy, account) is used, and every 30-min
+        // run writes one for each - 16 rows a run today. 100 is ample.
+        .limit(100),
       // Newest-first, NOT oldest-first. The cap is global across all strategies
       // and both accounts, so `ascending: true` froze every equity curve on
       // ancient history the moment the lab passed `limit` total closed trades -
@@ -202,11 +208,7 @@ export function useStrategyLab() {
     setLoading(false);
   }, []);
 
-  useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, POLL_MS);
-    return () => clearInterval(interval);
-  }, [refresh]);
+  usePolling(refresh, POLL_MS);
 
   return { accounts, strategies, links, evaluations, closedTrades, loading, refresh };
 }

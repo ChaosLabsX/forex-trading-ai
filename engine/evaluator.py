@@ -128,6 +128,10 @@ class ReadinessEvaluator:
                     "status": "eq.CLOSED",
                     "strategy_name": f"eq.{strategy_name}",
                     "account_key": f"eq.{account_key}",
+                    # Only what the loop below reads. Every closed trade is
+                    # re-read every 30 minutes; with all ~20 columns that was
+                    # ~0.5 MB a run, ~0.8 GB a month of the free plan's egress.
+                    "select": "realized_pnl,risk_amount,void_reason",
                     "order": "closed_at.asc",
                 },
             )

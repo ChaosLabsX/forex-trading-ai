@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { supabase } from "./supabase";
+import { usePolling } from "./usePolling";
 import type { Account } from "../types";
 
-const POLL_MS = 60_000;
+const POLL_MS = 5 * 60_000;
 
 /** Per-account counts of closed trades the evaluator silently excludes from
  * every statistic. Each category maps to a real, previously-lived incident:
@@ -85,12 +86,7 @@ export function useDataQuality(accounts: Account[]) {
     }
   }, []);
 
-  useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, POLL_MS);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [refresh, accounts.length]);
+  usePolling(refresh, POLL_MS, [accounts.length]);
 
   return { rows, loading };
 }

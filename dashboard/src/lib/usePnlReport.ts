@@ -1,10 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
+import { usePolling } from "./usePolling";
 import type { Trade } from "../types";
 
 /** Slower than the 15s dashboard loop on purpose: this is a settled-history
  * figure, and a closed trade never changes again. */
-const POLL_MS = 60_000;
+// Pages through every closed trade of the account; those change only when a
+// trade closes, so once a minute was ~50x more often than anything moved.
+const POLL_MS = 5 * 60_000;
 const PAGE = 1000;
 
 export type PeriodMode = "month" | "year" | "custom" | "all";
@@ -191,10 +194,8 @@ export function useAccountTrades(accountKey: string | null) {
 
   useEffect(() => {
     setLoading(true);
-    refresh();
-    const id = setInterval(refresh, POLL_MS);
-    return () => clearInterval(id);
   }, [refresh]);
+  usePolling(refresh, POLL_MS);
 
   return { trades, loading, refresh };
 }
