@@ -114,10 +114,13 @@ def trade_untracked(position, strategy: str, account: str) -> str:
     )
 
 
-def trade_closed(symbol: str, direction, breakdown, strategy: str, account: str) -> str:
+def trade_closed(symbol: str, direction, breakdown, strategy: str, account: str,
+                 exit_note: str | None = None) -> str:
     """A win reports gross profit before fees; a loss reports the all-in figure.
     Win/loss is decided by the NET result, so a small gain eaten by commission
-    correctly reads as a loss."""
+    correctly reads as a loss. `exit_note` says how it ended (trade_autopsy.
+    describe): "full stop, best was +0.6R" turns a bare loss into something you
+    can learn from at a glance."""
     subject = f"{symbol} {direction}" if direction else symbol
     if breakdown is None:
         return _line(
@@ -127,6 +130,8 @@ def trade_closed(symbol: str, direction, breakdown, strategy: str, account: str)
         detail = "before fees"
         if abs(breakdown.fees) >= 0.005:
             detail += f"  ·  fees {money(breakdown.fees)}"
+        if exit_note:
+            detail += f"  ·  {exit_note}"
         return _line(
             "✅",
             f"WIN  ·  {subject}  ·  {money(breakdown.gross_profit)}",
@@ -137,7 +142,7 @@ def trade_closed(symbol: str, direction, breakdown, strategy: str, account: str)
         "🔴",
         f"LOSS  ·  {subject}  ·  {money(breakdown.net)}",
         f"{strategy}  ·  {account}",
-        "incl. fees",
+        f"incl. fees  ·  {exit_note}" if exit_note else "incl. fees",
     )
 
 

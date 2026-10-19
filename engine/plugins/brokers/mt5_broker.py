@@ -73,6 +73,49 @@ def _trade_error(action: str, result) -> str:
     return f"{action} refused: {meaning} (retcode {retcode}){detail}"
 
 
+# MT5 stamps every deal with why it happened. On the closing deal, that is how
+# the trade ended - the broker's own record, not an inference from the P&L.
+# getattr with MT5's documented values, so a stand-in MetaTrader5 module (the
+# tests install one) without these constants can still import this file.
+_EXIT_HOW = {
+    getattr(mt5, "DEAL_REASON_SL", 4): "sl",
+    getattr(mt5, "DEAL_REASON_TP", 5): "tp",
+    getattr(mt5, "DEAL_REASON_SO", 6): "stop_out",
+    getattr(mt5, "DEAL_REASON_EXPERT", 3): "expert",  # closed by a program: this engine's close-all
+    getattr(mt5, "DEAL_REASON_CLIENT", 0): "client",  # by hand: desktop terminal
+    getattr(mt5, "DEAL_REASON_MOBILE", 1): "client",  # by hand: phone app
+    getattr(mt5, "DEAL_REASON_WEB", 2): "client",  # by hand: web terminal
+}
+
+
+def summarize_closed_deals(deals, to_utc) -> ClosedTradePnl | None:
+    """A closed position's result from its deals, or None while it is still open.
+
+    Sums across ALL deals, not just the closing one: profit lands on the exit
+    deal, but commission is charged on entry AND exit, so a closing-deal-only sum
+    understates fees. The exit price is volume-weighted over the closing deals
+    (a partial close leaves several). The exit fields are best-effort - an
+    unreadable clock costs the exit time, never the P&L."""
+    if not deals:
+        return None
+    exits = [d for d in deals if d.entry == mt5.DEAL_ENTRY_OUT]
+    if not exits:
+        return None  # no closing deal: still open
+    volume = sum(d.volume for d in exits)
+    try:
+        exit_time = to_utc(exits[-1].time)
+    except Exception:
+        exit_time = None
+    return ClosedTradePnl(
+        gross_profit=float(sum(d.profit for d in deals)),
+        commission=float(sum(d.commission for d in deals)),
+        swap=float(sum(d.swap for d in deals)),
+        exit_price=float(sum(d.price * d.volume for d in exits) / volume) if volume else None,
+        exit_how=_EXIT_HOW.get(exits[-1].reason, "other"),
+        exit_time=exit_time,
+    )
+
+
 class MT5BrokerAdapter(BrokerAdapter):
     """Talks to a locally-running, logged-in MT5 terminal via the MetaTrader5
     IPC package. If MT5_LOGIN/PASSWORD/TERMINAL_PATH aren't set, attaches to
@@ -494,20 +537,7 @@ class MT5BrokerAdapter(BrokerAdapter):
         return breakdown.net if breakdown is not None else None
 
     def get_closed_position_breakdown(self, position_id: str) -> ClosedTradePnl | None:
-        deals = mt5.history_deals_get(position=int(position_id))
-        if not deals:
-            return None
-        # Require a closing deal so we don't report on a still-open position.
-        if not any(d.entry == mt5.DEAL_ENTRY_OUT for d in deals):
-            return None
-        # Sum across ALL deals, not just the closing one: profit lands on the
-        # exit deal, but commission is charged on entry AND exit, so a
-        # closing-deal-only sum understates fees.
-        return ClosedTradePnl(
-            gross_profit=float(sum(d.profit for d in deals)),
-            commission=float(sum(d.commission for d in deals)),
-            swap=float(sum(d.swap for d in deals)),
-        )
+        return summarize_closed_deals(mt5.history_deals_get(position=int(position_id)), self._to_utc)
 
     def _to_position(self, raw) -> Position:
         return Position(

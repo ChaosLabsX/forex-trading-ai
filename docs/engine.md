@@ -71,9 +71,20 @@ For each configured `StrategyPlugin`, for each instrument in its
 Every refresh cycle, `_reconcile_closed_trades()` diffs `trades` rows with
 `status=OPEN` against `broker.get_open_positions()`. Anything in the DB but no
 longer open at the broker has closed (stop, target, or manual) -
-`broker.get_closed_position_pnl()` fetches the real realized P&L from MT5's
-deal history, the row gets updated to `CLOSED`, and a Telegram alert fires with
-the actual number.
+`broker.get_closed_position_breakdown()` fetches the real realized P&L from
+MT5's deal history, the row gets updated to `CLOSED`, and a Telegram alert fires
+with the actual number.
+
+The same update records the trade's autopsy (migration 0017,
+`engine/trade_autopsy.py`): `exit_reason` from MT5's own closing deal (target,
+full stop, stop at entry, trailing stop, by hand, ...), `exit_price`, and how
+far the trade went for and against us (`max_favorable_r` / `max_adverse_r`, from
+1-minute bars). The alert says it too - "full stop, best was +0.6R". It costs
+no extra Supabase request, and it can never block the close: if writing it
+fails, the trade is closed without it. `scripts/backfill_trade_autopsy.py`
+fills older trades from MT5 history; `scripts/trade_autopsy_report.py` reads
+it all back ("do our losers never go our way, or reverse from +0.8R?"). Its
+patterns are hypotheses for the backtest, never live changes on their own.
 
 ### Circuit breakers
 

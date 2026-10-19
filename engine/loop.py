@@ -5,7 +5,7 @@ import random
 import time
 from datetime import date, datetime, timedelta, timezone
 
-from engine import review_scoring
+from engine import review_scoring, trade_autopsy
 from engine.config import Settings
 from engine.core.interfaces.market_data import MarketDataUnavailable, SymbolUnavailableError
 from engine.core.interfaces.strategy import StrategyContext
@@ -1102,28 +1102,23 @@ class EngineLoop:
                 breakdown = None
 
             net = breakdown.net if breakdown is not None else None
-            try:
-                self._supabase.update(
-                    "trades",
-                    {"mt5_ticket": f"eq.{ticket}"},
-                    {
-                        "status": "CLOSED",
-                        "realized_pnl": net,
-                        # The same split Telegram already reports (win before
-                        # fees, loss all-in). Stored so the dashboard can make
-                        # that distinction too - previously the parts were
-                        # computed here and thrown away, leaving one number that
-                        # could not separate a thin win from its costs. Purely
-                        # additive: realized_pnl stays the source of truth for
-                        # every statistic. See migration 0015.
-                        "gross_profit": breakdown.gross_profit if breakdown else None,
-                        "commission": breakdown.commission if breakdown else None,
-                        "swap": breakdown.swap if breakdown else None,
-                        "closed_at": datetime.now(timezone.utc).isoformat(),
-                    },
-                )
-            except Exception:
-                logger.exception("failed to persist closed trade %s", ticket)
+            closed = {
+                "status": "CLOSED",
+                "realized_pnl": net,
+                # The same split Telegram already reports (win before
+                # fees, loss all-in). Stored so the dashboard can make
+                # that distinction too - previously the parts were
+                # computed here and thrown away, leaving one number that
+                # could not separate a thin win from its costs. Purely
+                # additive: realized_pnl stays the source of truth for
+                # every statistic. See migration 0015.
+                "gross_profit": breakdown.gross_profit if breakdown else None,
+                "commission": breakdown.commission if breakdown else None,
+                "swap": breakdown.swap if breakdown else None,
+                "closed_at": datetime.now(timezone.utc).isoformat(),
+            }
+            autopsy = self._trade_autopsy(row, breakdown)
+            if not self._persist_close(ticket, closed, autopsy):
                 continue
 
             net_text = f"{net:+.2f}" if net is not None else "unknown"
@@ -1139,8 +1134,68 @@ class EngineLoop:
                     breakdown,
                     strategy=row.get("strategy_name", ""),
                     account=self._account_label(),
+                    exit_note=trade_autopsy.describe(autopsy),
                 ),
             )
+
+    def _persist_close(self, ticket: str, closed: dict, autopsy: dict) -> bool:
+        """Mark the trade CLOSED, with its autopsy when there is one.
+
+        The autopsy is a nice-to-have and must never stop the close itself: if
+        the write with it fails (e.g. migration 0017 not applied yet, so the
+        columns don't exist), the close is retried without it. A trade left OPEN
+        in the table would be re-checked forever and never counted."""
+        where = {"mt5_ticket": f"eq.{ticket}"}
+        if autopsy:
+            try:
+                self._supabase.update("trades", where, {**closed, **autopsy})
+                return True
+            except Exception:
+                logger.exception("closing trade %s with its autopsy failed - retrying without it", ticket)
+        try:
+            self._supabase.update("trades", where, closed)
+            return True
+        except Exception:
+            logger.exception("failed to persist closed trade %s", ticket)
+            return False
+
+    def _trade_autopsy(self, row: dict, breakdown) -> dict:
+        """How the trade ended and how far it went for/against us
+        (engine/trade_autopsy.py). Each part is best-effort and independent:
+        a missing price feed costs the excursions, not the exit reason. Never
+        raises - this runs inside the close."""
+        if breakdown is None:
+            return {}
+        result: dict = {}
+        try:
+            entry = float(row["entry_price"])
+            stop = float(row.get("initial_stop_loss") or row["stop_loss"])
+            result["exit_reason"] = trade_autopsy.classify_exit(
+                row["direction"], entry, stop, breakdown.exit_price, breakdown.exit_how
+            )
+            if breakdown.exit_price is not None:
+                result["exit_price"] = breakdown.exit_price
+        except Exception:
+            logger.exception("could not classify how trade %s ended", row.get("mt5_ticket"))
+            return result
+        market_data = self._engine.market_data
+        if market_data is None:
+            return result
+        try:
+            opened = datetime.fromisoformat(row["opened_at"])
+            now = datetime.now(timezone.utc)
+            timeframe, count = trade_autopsy.bars_request(opened, now)
+            bars = trade_autopsy.bars_during(
+                market_data.get_candles(row["symbol"], timeframe, count),
+                timeframe, opened, breakdown.exit_time or now,
+            )
+            best, worst = trade_autopsy.excursions(row["direction"], entry, stop, bars)
+            if best is not None:
+                result["max_favorable_r"] = best
+                result["max_adverse_r"] = worst
+        except Exception:
+            logger.exception("could not measure the excursions of trade %s", row.get("mt5_ticket"))
+        return result
 
     def _log_block_once(self, strategy_name: str, reason: str) -> None:
         if self._logged_blocks.get(strategy_name) == reason:

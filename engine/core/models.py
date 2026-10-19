@@ -130,6 +130,11 @@ class ClosedTradePnl:
     gross_profit: float  # market P&L only, before any costs
     commission: float
     swap: float
+    # How the position ended, from the closing deal (see engine/trade_autopsy.py).
+    # Optional: a broker that can't tell still reports the P&L.
+    exit_price: float | None = None
+    exit_how: str | None = None  # "sl" | "tp" | "client" | "expert" | "stop_out" | "other"
+    exit_time: datetime | None = None  # UTC
 
     @property
     def fees(self) -> float:
