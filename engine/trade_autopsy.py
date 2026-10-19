@@ -18,11 +18,15 @@ scripts/backtest.py - never a reason to change a live rule on its own. Reading
 "what would have saved the last few losers" off this data and acting on it is
 exactly the mining docs/research-log.md forbids.
 
-Excursions come from bid-price bars between open and close, so they carry two
-small, known errors: the first bar can include prices from just before the
-entry and the last from just after the exit, and a short's stop fills at the ask
-while the bars are bids. 1-minute bars keep both small; older trades
-backfilled from 5- or 15-minute bars carry more.
+Excursions come from the bid-price bars that lie WHOLLY inside the trade, plus
+the fill and exit prices themselves. A bar that straddles the entry or the exit
+is left out, because its high and low can't be split into before and after: the
+first version kept them, and on 2026-10-13 a GBPJPY short filled 50 seconds
+into the minute, after a 14-pip bounce, was credited with that bounce (+2.3R
+"best" on a trade that never got near +1R). Leaving them out can miss an extreme
+inside those partial minutes, so the figures lean conservative. A short's stop
+fills at the ask while the bars are bids; coarser bars on older backfilled
+trades widen both effects.
 """
 
 from __future__ import annotations
@@ -97,20 +101,24 @@ def bars_request(opened_at: datetime, now: datetime) -> tuple[Timeframe, int]:
 
 def bars_during(bars: list[Candle], timeframe: Timeframe, opened_at: datetime,
                 closed_at: datetime) -> list[Candle]:
-    """Bars that overlap the time the trade was open (a bar's time is its open)."""
+    """Bars that lie wholly inside the trade - opened at or after the fill and
+    closed by the exit (a bar's time is its open). See the module docstring for
+    why the straddling ones are left out."""
     span = timedelta(minutes=_TF_MINUTES.get(timeframe, 1))
-    return [b for b in bars if b.time + span > opened_at and b.time <= closed_at]
+    return [b for b in bars if b.time >= opened_at and b.time + span <= closed_at]
 
 
-def excursions(direction, entry: float, initial_stop: float,
-               bars: list[Candle]) -> tuple[float | None, float | None]:
+def excursions(direction, entry: float, initial_stop: float, bars: list[Candle],
+               exit_price: float | None = None) -> tuple[float | None, float | None]:
     """(max favorable, max adverse) excursion in R, or (None, None) when there is
-    nothing to measure."""
+    nothing to measure. The exit fill counts as a price the trade reached, so a
+    trade shorter than one whole bar still gets an honest lower bound."""
     risk = abs(entry - initial_stop)
-    if not bars or risk <= 0 or entry <= 0:
+    if risk <= 0 or entry <= 0 or (not bars and exit_price is None):
         return None, None
-    high, low = max(b.high for b in bars), min(b.low for b in bars)
-    best, worst = (high, low) if _is_long(direction) else (low, high)
+    highs = [b.high for b in bars] + ([exit_price] if exit_price is not None else [])
+    lows = [b.low for b in bars] + ([exit_price] if exit_price is not None else [])
+    best, worst = (max(highs), min(lows)) if _is_long(direction) else (min(lows), max(highs))
     return (round(max(0.0, price_r(direction, entry, risk, best)), 3),
             round(min(0.0, price_r(direction, entry, risk, worst)), 3))
 

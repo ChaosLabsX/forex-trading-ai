@@ -16,6 +16,10 @@ further back - so older excursions are a little coarser.
 Idempotent: only rows whose exit_reason is still NULL are touched, and a row
 whose deals or bars can't be found is left NULL rather than guessed. One small
 write per trade, once - well inside the free plan.
+
+--recompute redoes EVERY closed trade of the account, overwriting what is
+there. Needed once after 2026-10-19, when the excursions stopped counting the
+partial minutes before the fill and after the exit (engine/trade_autopsy.py).
 """
 
 from __future__ import annotations
@@ -61,6 +65,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--env-file", help="e.g. .env.live for the live account")
     parser.add_argument("--apply", action="store_true", help="write the results (default: show them)")
+    parser.add_argument("--recompute", action="store_true",
+                        help="redo every closed trade, not only those without an autopsy")
     args = parser.parse_args()
 
     settings = load_settings(args.env_file)
@@ -69,12 +75,12 @@ def main() -> int:
     rows = supabase.select("trades", {
         "account_key": f"eq.{account}",
         "status": "eq.CLOSED",
-        "exit_reason": "is.null",
+        **({} if args.recompute else {"exit_reason": "is.null"}),
         "void_reason": "is.null",
         "select": "id,mt5_ticket,symbol,direction,entry_price,initial_stop_loss,stop_loss,opened_at,closed_at",
         "order": "opened_at.asc",
     })
-    print(f"{account}: {len(rows)} closed trade(s) without an autopsy")
+    print(f"{account}: {len(rows)} closed trade(s) " + ("to recompute" if args.recompute else "without an autopsy"))
     if not rows:
         return 0
 
@@ -113,7 +119,8 @@ def main() -> int:
             timeframe, bars = bars_covering(market_data, bars_cache, symbol, opened, now)
             if timeframe is not None:
                 best, worst = trade_autopsy.excursions(
-                    row["direction"], entry, stop, trade_autopsy.bars_during(bars, timeframe, opened, closed))
+                    row["direction"], entry, stop, trade_autopsy.bars_during(bars, timeframe, opened, closed),
+                    breakdown.exit_price)
                 if best is not None:
                     update["max_favorable_r"], update["max_adverse_r"] = best, worst
             else:
@@ -137,8 +144,10 @@ def main() -> int:
     written = 0
     for row, update, _ in found:
         try:
-            # exit_reason still NULL: never overwrite what the engine wrote meanwhile
-            supabase.update("trades", {"id": f"eq.{row['id']}", "exit_reason": "is.null"}, update)
+            # Without --recompute, only where exit_reason is still NULL: never
+            # overwrite what the engine wrote meanwhile.
+            where = {"id": f"eq.{row['id']}"} if args.recompute else {"id": f"eq.{row['id']}", "exit_reason": "is.null"}
+            supabase.update("trades", where, update)
             written += 1
         except Exception as exc:
             print(f"  write failed for {row['mt5_ticket']}: {exc}")

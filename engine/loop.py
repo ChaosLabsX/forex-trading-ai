@@ -1189,7 +1189,7 @@ class EngineLoop:
                 market_data.get_candles(row["symbol"], timeframe, count),
                 timeframe, opened, breakdown.exit_time or now,
             )
-            best, worst = trade_autopsy.excursions(row["direction"], entry, stop, bars)
+            best, worst = trade_autopsy.excursions(row["direction"], entry, stop, bars, breakdown.exit_price)
             if best is not None:
                 result["max_favorable_r"] = best
                 result["max_adverse_r"] = worst

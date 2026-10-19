@@ -123,8 +123,22 @@ def main() -> int:
                         ta.excursions(L, 0.0, 0.999, bars), (None, None)))
     window = minute_bars([(1, 1)] * 10, start=T0 - timedelta(minutes=3))
     kept = ta.bars_during(window, Timeframe.M1, T0 + timedelta(seconds=30), T0 + timedelta(minutes=4, seconds=10))
-    passed.append(check("window: the entry minute through the exit minute",
-                        (kept[0].time, kept[-1].time), (T0, T0 + timedelta(minutes=4))))
+    passed.append(check("window: only whole minutes inside the trade (not the fill or exit minute)",
+                        (kept[0].time, kept[-1].time), (T0 + timedelta(minutes=1), T0 + timedelta(minutes=3))))
+
+    # 2026-10-13, live: H1 closed at 09:00:00 at 208.942, the short filled at
+    # 09:00:50 at 209.084 after a 14-pip bounce, stop 209.14541. The 09:00 minute
+    # bar's low (208.942) happened BEFORE the fill - counting it read as +2.3R.
+    gbp = [Candle("GBPJPY", Timeframe.M1, T0, 208.942, 209.100, 208.942, 209.080, 1),
+           Candle("GBPJPY", Timeframe.M1, T0 + timedelta(minutes=1), 209.080, 209.110, 209.040, 209.090, 1),
+           Candle("GBPJPY", Timeframe.M1, T0 + timedelta(minutes=2), 209.090, 209.140, 209.050, 209.130, 1),
+           Candle("GBPJPY", Timeframe.M1, T0 + timedelta(minutes=3), 209.130, 209.160, 209.120, 209.150, 1)]
+    inside = ta.bars_during(gbp, Timeframe.M1, T0 + timedelta(seconds=50), T0 + timedelta(minutes=3, seconds=20))
+    best, worst = ta.excursions(S, 209.084, 209.14541, inside, 209.145)
+    passed.append(check("13 Oct GBPJPY: the pre-fill bounce no longer counts (best +0.7R, not +2.3R)",
+                        (round(best, 1), round(worst, 1)), (0.7, -1.0)))
+    passed.append(check("a trade shorter than a minute: measured from its exit fill",
+                        ta.excursions(L, 1.0, 0.999, [], 0.9990), (0.0, -1.0)))
     passed.append(check("2-hour-old trade: 1-minute bars", ta.bars_request(T0, T0 + timedelta(hours=2)), (Timeframe.M1, 130)))
     passed.append(check("5-week-old trade: 1-minute bars still reach",
                         ta.bars_request(T0, T0 + timedelta(days=35))[0], Timeframe.M1))
@@ -151,7 +165,7 @@ def main() -> int:
            "direction": "SHORT", "entry_price": 0.85646, "initial_stop_loss": 0.85694, "stop_loss": 0.85694,
            "opened_at": (T0).isoformat()}
     exit_pnl = ClosedTradePnl(-3.55, -0.36, 0.0, exit_price=0.85694, exit_how="sl", exit_time=T0 + timedelta(minutes=2))
-    path = minute_bars([(0.85620, 0.85650), (0.85636, 0.85700), (0.85690, 0.85710)])
+    path = minute_bars([(0.85620, 0.85650), (0.85636, 0.85690), (0.85690, 0.85710)])  # stop hit in the 3rd minute
     messages = []
     def engine_for(md):
         notifier = types.SimpleNamespace(notify=lambda event: messages.append(event.message))
@@ -167,7 +181,7 @@ def main() -> int:
                         (1, "CLOSED", -3.91)))
     passed.append(check("...and its autopsy in the same write",
                         (values["exit_reason"], values["exit_price"], values["max_favorable_r"], values["max_adverse_r"]),
-                        ("stop", 0.85694, 0.542, -1.333)))
+                        ("stop", 0.85694, 0.542, -1.0)))
     passed.append(check("Telegram says how it ended", messages[-1].splitlines()[-1], "incl. fees  ·  full stop, best was +0.5R"))
 
     db = FakeSupabase([row], fail_first_update=True)
