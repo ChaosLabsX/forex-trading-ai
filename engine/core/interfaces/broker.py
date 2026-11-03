@@ -76,6 +76,17 @@ class BrokerAdapter(ABC):
         """
         return None
 
+    def market_entry_price(self, symbol: str, direction: Direction) -> float | None:
+        """The price a market order in `direction` would fill at right now - the
+        ask to buy, the bid to sell - or None if it can't be read.
+
+        Lets sizing use the price the order will actually get instead of the
+        candle close the signal was priced from. Concrete, not abstract: an
+        adapter that can't answer returns None and sizing falls back to the
+        signal's price, exactly as before.
+        """
+        return None
+
     def clock_is_provisional(self) -> bool:
         """True while the broker's clock is remembered rather than measured.
 

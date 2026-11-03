@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 from engine.config import Settings
 from engine.core.interfaces.broker import BrokerAdapter
 from engine.core.interfaces.risk import RiskEngine
-from engine.core.models import AccountState, ApprovedOrder, Position, PositionStatus, RiskDecision, Signal
+from engine.core.models import (
+    AccountState, ApprovedOrder, Direction, Position, PositionStatus, RiskDecision, Signal,
+)
 from engine.sizing import size_position, smallest_placeable_lots
 
 logger = logging.getLogger("engine.risk")
@@ -203,6 +206,46 @@ class DefaultRiskEngine(RiskEngine):
         )
         if result.lots is None:
             return RiskDecision(approved=False, reason=f"not sized: {result.reason}")
+
+        # SIZE FROM THE PRICE THE ORDER WILL GET, NEVER ABOVE THE PLAN. The
+        # signal is priced from the candle close; the market order fills at
+        # whatever the price is now. If it has moved AWAY from the stop, the
+        # stop is further than planned and the planned lots would risk more
+        # than risk_pct - measured on this account at up to 1.4x (2026-11-03).
+        # So the lots are the SMALLER of the plan and the live-price size: the
+        # money at risk can only come out at or below the setting, never above.
+        # If the price has moved TOWARD the stop, the plan is kept - more lots
+        # on a tighter stop would be a bigger position on a distorted trade.
+        live = None
+        try:
+            live = broker.market_entry_price(signal.symbol, signal.direction)
+        except Exception:
+            logger.exception("could not read the live price for %s - sizing from the signal", signal.symbol)
+        if live is not None:
+            is_long = signal.direction == Direction.LONG
+            if (live <= signal.stop_loss) if is_long else (live >= signal.stop_loss):
+                return RiskDecision(
+                    approved=False,
+                    reason=f"price {live} is already past the stop {signal.stop_loss:.5f} - not entering",
+                )
+            at_live = size_position(
+                equity=account_state.equity,
+                risk_pct=effective,
+                entry_price=live,
+                stop_loss=signal.stop_loss,
+                limits=limits,
+            )
+            if at_live.lots is None:
+                return RiskDecision(
+                    approved=False,
+                    reason=f"not sized at the live price {live}: {at_live.reason}",
+                )
+            if at_live.lots < result.lots:
+                result = replace(
+                    at_live,
+                    reason=f"{at_live.reason} - sized from the live price {live}, "
+                           f"not the signal's {signal.entry_price}",
+                )
 
         # Margin check: sizing bounds the LOSS, not the capital committed. A
         # correctly-sized trade can still be unaffordable.

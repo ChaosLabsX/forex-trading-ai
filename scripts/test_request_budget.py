@@ -64,9 +64,11 @@ def polls_in(seconds: int, is_lab: bool, flat: bool) -> int:
     polls = []
     loop = bare_loop(
         _connected=True, _flat=flat, _last_command_poll=0.0,
-        _last_heartbeat=1e12, _last_candle_refresh=1e12, _last_manage=1e12, _last_evaluation=1e12,
+        _last_heartbeat=1e12, _last_manage=1e12, _last_evaluation=1e12,
+        _last_candle_minute=None, _pending_reviews=[],
         _settings=types.SimpleNamespace(evaluation_interval_minutes=30),
     )
+    loop._refresh_market_data_and_evaluate = lambda: None  # the candle pass is not under test here
     loop._ensure_connected = lambda: None
     loop._is_lab = lambda: is_lab
     loop._process_commands = lambda: polls.append(clock[0])

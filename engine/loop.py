@@ -53,7 +53,15 @@ COMMAND_POLL_FLAT_SECONDS = 10  # live account, nothing open: only "pause" can m
 COMMAND_POLL_LAB_SECONDS = 15  # demo lab: no real money behind any button
 # Rows per candles upsert; the first pass after a start sends whole windows.
 CANDLE_PERSIST_CHUNK = 1000
-CANDLE_REFRESH_INTERVAL_SECONDS = 60
+# The candle pass (fetch prices, evaluate, place orders) runs once a minute, this
+# many seconds AFTER the minute turns. It used to run every 60s from whenever
+# the engine started, so a new hourly bar was evaluated anywhere up to a minute
+# after it closed - 45-55s in practice - and the market order filled at a price
+# that had moved on from the close the strategy priced its stop and target
+# from. On 2026-10-13 GBPJPY moved 14 pips in those 50s: the planned 20-pip
+# stop became a 6-pip one and was hit by noise. A few seconds' grace lets the
+# first tick of the new hour arrive, which is what closes the old bar in MT5.
+CANDLE_PASS_SECOND = 3
 # Trailing/breakeven stops react to intra-minute price, so manage open
 # positions far more often than the 60s candle cycle (but not every 2s tick -
 # a modify only matters when price has meaningfully advanced).
@@ -71,6 +79,17 @@ def command_poll_interval(is_lab: bool, flat: bool) -> int:
     if is_lab:
         return COMMAND_POLL_LAB_SECONDS
     return COMMAND_POLL_FLAT_SECONDS if flat else COMMAND_POLL_SECONDS
+
+
+def candle_pass_due(now_utc: datetime, last_pass_minute: datetime | None) -> bool:
+    """True once per wall-clock minute, from CANDLE_PASS_SECOND past it.
+
+    Anchored to the clock rather than to the last pass, so the pass always lands
+    just after the minute - and so just after every hourly close - whenever the
+    engine happened to start. A pass that overruns into the next minute is
+    followed by the next one straight away, never skipped."""
+    minute = now_utc.replace(second=0, microsecond=0)
+    return minute != last_pass_minute and now_utc.second >= CANDLE_PASS_SECOND
 
 
 def candles_to_persist(candles: list[Candle], mark: datetime | None) -> list[Candle]:
@@ -132,7 +151,11 @@ class EngineLoop:
         # True only once a position read has come back empty - see
         # command_poll_interval. Starts False: unknown is treated as holding.
         self._flat = False
-        self._last_candle_refresh = 0.0
+        # Wall-clock minute (UTC) of the last candle pass - see candle_pass_due.
+        self._last_candle_minute: datetime | None = None
+        # AI reviews of signals fired this pass, run once every order is in
+        # (see _run_pending_reviews).
+        self._pending_reviews: list[tuple] = []
         self._last_manage = 0.0
         self._last_evaluation = 0.0
         # How Claude's own past verdicts turned out, refreshed on the evaluation
@@ -245,12 +268,15 @@ class EngineLoop:
         if self._connected and now - self._last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
             self._send_heartbeat()
             self._last_heartbeat = now
-        if self._connected and now - self._last_candle_refresh >= CANDLE_REFRESH_INTERVAL_SECONDS:
+        wall = datetime.now(timezone.utc)
+        if self._connected and candle_pass_due(wall, self._last_candle_minute):
+            self._last_candle_minute = wall.replace(second=0, microsecond=0)
             self._refresh_market_data_and_evaluate()
-            self._last_candle_refresh = now
         if self._connected and now - self._last_manage >= MANAGE_INTERVAL_SECONDS:
             self._manage_open_positions()
             self._last_manage = now
+        # After the orders AND a first look at the new positions' stops.
+        self._run_pending_reviews()
         # Evaluation and the digest read only Supabase, so they keep working
         # (and keep reporting) even while the broker is down.
         if now - self._last_evaluation >= self._settings.evaluation_interval_minutes * 60:
@@ -812,9 +838,24 @@ class EngineLoop:
                 )
                 self._update_signal_risk(signal_id, risk_approved, risk_reason)
                 if signal_id is not None:
-                    self._review_with_ai(signal_id, evaluation.signal, context)
+                    # Reviewed after the pass, not here: a review takes ~12s, and
+                    # here it held up every later symbol's order by that long.
+                    self._pending_reviews.append((signal_id, evaluation.signal, context))
             else:
                 logger.info("no signal: %s %s - %s", strategy.name, symbol, evaluation.reason)
+
+    def _run_pending_reviews(self) -> None:
+        """Run the AI reviews queued during the candle pass.
+
+        The review is shadow-only - it never changes a trade - so nothing is lost
+        by doing it seconds later, once every order of the pass has gone in and
+        the new positions have had a first stop check. Each review still blocks
+        the loop while it runs (~12s at effort "high")."""
+        if not self._pending_reviews:
+            return
+        pending, self._pending_reviews = self._pending_reviews, []
+        for signal_id, signal, context in pending:
+            self._review_with_ai(signal_id, signal, context)
 
     def _should_review(self) -> bool:
         """Whether to spend an Opus call reviewing this signal.

@@ -71,6 +71,13 @@ lots         = floor(budget / loss_per_lot / volume_step) × volume_step
 
 - **Always rounds down.** Rounding up would exceed the risk budget - the one
   direction it must never err in.
+- **Never above the plan at the live price** (since 2026-11-03). The signal is
+  priced from the candle close; the market order fills at the live price. Lots
+  are the smaller of the size at the signal's price and the size at the live
+  price (`broker.market_entry_price`), so a move away from the stop - which
+  made the real stop wider and once put 1.4x the setting at risk - can only
+  shrink the position. A move toward the stop keeps the planned size rather
+  than growing it. A price already past the stop is refused.
 - **Refuses rather than guesses**: zero stop distance, sub-minimum lot size,
   unknown symbol, missing tick value, zero equity.
 - **Clamped** to the broker's `volume_min` / `volume_max` / `volume_step`, read

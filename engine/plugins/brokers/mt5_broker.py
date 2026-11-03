@@ -536,6 +536,14 @@ class MT5BrokerAdapter(BrokerAdapter):
         breakdown = self.get_closed_position_breakdown(position_id)
         return breakdown.net if breakdown is not None else None
 
+    def market_entry_price(self, symbol: str, direction: Direction) -> float | None:
+        # The same side place_order() fills at, read the same way.
+        tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            return None
+        price = tick.ask if direction == Direction.LONG else tick.bid
+        return float(price) if price and price > 0 else None
+
     def get_closed_position_breakdown(self, position_id: str) -> ClosedTradePnl | None:
         return summarize_closed_deals(mt5.history_deals_get(position=int(position_id)), self._to_utc)
 

@@ -21,8 +21,13 @@ A single `while True` loop, `POLL_INTERVAL_SECONDS = 2`:
 3. **`_send_heartbeat()`** - every 60s, inserts a row into `engine_heartbeats`
    (status, broker_connected). The dashboard's "Engine Health" card considers a
    heartbeat older than 3 minutes stale.
-4. **`_refresh_market_data_and_evaluate()`** - every 60s: fetches H1/H4/D1
-   candles for each configured instrument and runs strategy evaluation. The
+4. **`_refresh_market_data_and_evaluate()`** - once a minute, 3s after the
+   minute turns (`candle_pass_due`), so an hourly close is acted on within
+   seconds rather than up to a minute later - the late fill used to shift the
+   real stop away from the one the strategy priced. Fetches H1/H4/D1 candles
+   for each configured instrument and runs strategy evaluation. AI reviews of
+   the pass's signals run after it (`_run_pending_reviews`), so a ~12s review of
+   one symbol no longer delays the next symbol's order. The
    demo lab alone then stores the newly CLOSED bars in `candles`, all of a
    pass's in one upsert (idempotent on `symbol,timeframe,time`) - normally one
    request an hour. Nothing reads `candles` back; it is an archive. It used to
