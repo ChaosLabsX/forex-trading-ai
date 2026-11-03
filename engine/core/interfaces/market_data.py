@@ -33,3 +33,11 @@ class MarketDataProvider(ABC):
 
     @abstractmethod
     def get_candles(self, symbol: str, timeframe: Timeframe, count: int) -> list[Candle]: ...
+
+    def get_history(self, symbol: str, timeframe: Timeframe, count: int) -> list[Candle]:
+        """Like get_candles, but every bar is stamped with the UTC offset in force
+        when IT formed - for windows long enough to cross a daylight-saving
+        switch (backtests, trade autopsies). get_candles' single current offset
+        is right for the engine's recent windows and an hour wrong across a
+        switch. Concrete: a provider without the distinction serves get_candles."""
+        return self.get_candles(symbol, timeframe, count)

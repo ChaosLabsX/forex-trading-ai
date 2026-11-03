@@ -32,7 +32,7 @@ from __future__ import annotations
 import json
 import logging
 import time as time_module
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import MetaTrader5 as mt5
@@ -117,6 +117,66 @@ def clock_cache_path(account_key: str) -> Path:
 
 def server_epoch_to_utc(epoch_seconds: float, offset_seconds: float) -> datetime:
     return datetime.fromtimestamp(epoch_seconds - offset_seconds, tz=timezone.utc)
+
+
+# --- history: the offset that applied WHEN a bar formed ----------------------
+#
+# The measured offset is right for now, and an hour wrong for anything from the
+# other side of a daylight-saving switch. Applying it to history labelled every
+# summer bar an hour late in a winter backtest (and every winter bar an hour
+# early in a summer one): london_breakout's 07:00-10:00 UTC window ran an hour
+# off for about two thirds of each year, and the trade autopsy measured
+# "how far it went" on the hour BEFORE the trade.
+#
+# This broker runs the "New York close" convention: server time is New York
+# time + 7h, so 00:00 server is always 17:00 in New York. That makes it UTC+3
+# while New York is on daylight time and UTC+2 otherwise. Read off its own deal
+# records on 2026-11-03 (scripts/diagnose_clock_history.py): +3.00h every week
+# from 2026-07-16 to 2026-10-26, +2.00h from 2026-11-02 - the US switch on
+# 1 Nov, not Europe's on 25 Oct. Callers verify the rule against the measured
+# offset before trusting it (follows_ny_close), so a broker on another
+# convention is refused rather than mislabelled.
+NY_CLOSE_SERVER_HOURS_SUMMER = 3
+NY_CLOSE_SERVER_HOURS_WINTER = 2
+
+
+def _nth_sunday(year: int, month: int, n: int) -> date:
+    first = date(year, month, 1)
+    first_sunday = first + timedelta(days=(6 - first.weekday()) % 7)
+    return first_sunday + timedelta(weeks=n - 1)
+
+
+def new_york_is_dst(utc: datetime) -> bool:
+    """US daylight time (the rule since 2007): from the second Sunday of March
+    at 02:00 EST (07:00 UTC) to the first Sunday of November at 02:00 EDT
+    (06:00 UTC)."""
+    start = datetime.combine(_nth_sunday(utc.year, 3, 2), datetime.min.time(), tzinfo=timezone.utc) + timedelta(hours=7)
+    end = datetime.combine(_nth_sunday(utc.year, 11, 1), datetime.min.time(), tzinfo=timezone.utc) + timedelta(hours=6)
+    return start <= utc < end
+
+
+def ny_close_offset_seconds(utc: datetime) -> int:
+    """The New-York-close server's UTC offset at a given instant."""
+    hours = NY_CLOSE_SERVER_HOURS_SUMMER if new_york_is_dst(utc) else NY_CLOSE_SERVER_HOURS_WINTER
+    return hours * 3600
+
+
+def server_epoch_to_utc_ny_close(epoch_seconds: float) -> datetime:
+    """A historical server timestamp to true UTC, using the offset in force when
+    it was stamped. Of the two possible offsets, the one consistent with itself
+    wins; the only instants matching neither or both fall inside the switch
+    hour itself, on a Sunday morning while FX is shut."""
+    for hours in (NY_CLOSE_SERVER_HOURS_SUMMER, NY_CLOSE_SERVER_HOURS_WINTER):
+        candidate = datetime.fromtimestamp(epoch_seconds - hours * 3600, tz=timezone.utc)
+        if ny_close_offset_seconds(candidate) == hours * 3600:
+            return candidate
+    return datetime.fromtimestamp(epoch_seconds - NY_CLOSE_SERVER_HOURS_WINTER * 3600, tz=timezone.utc)
+
+
+def follows_ny_close(measured_offset_seconds: float, now_utc: datetime) -> bool:
+    """Whether the offset measured now is what the New-York-close rule predicts
+    for now. The check that licenses relabelling history with the rule."""
+    return abs(measured_offset_seconds - ny_close_offset_seconds(now_utc)) < 60
 
 
 class ServerClock:

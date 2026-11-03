@@ -1227,7 +1227,7 @@ class EngineLoop:
             now = datetime.now(timezone.utc)
             timeframe, count = trade_autopsy.bars_request(opened, now)
             bars = trade_autopsy.bars_during(
-                market_data.get_candles(row["symbol"], timeframe, count),
+                market_data.get_history(row["symbol"], timeframe, count),
                 timeframe, opened, breakdown.exit_time or now,
             )
             best, worst = trade_autopsy.excursions(row["direction"], entry, stop, bars, breakdown.exit_price)

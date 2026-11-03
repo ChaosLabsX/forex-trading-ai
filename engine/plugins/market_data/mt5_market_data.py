@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import MetaTrader5 as mt5
 
 from engine.config import Settings
-from engine.core.interfaces.market_data import MarketDataProvider, SymbolUnavailableError
+from engine.core.interfaces.market_data import MarketDataUnavailable, MarketDataProvider, SymbolUnavailableError
 from engine.core.models import Candle, Tick, Timeframe
-from engine.plugins.brokers.mt5_time import ServerClock, clock_cache_path, server_epoch_to_utc
+from engine.plugins.brokers.mt5_time import (
+    ServerClock,
+    clock_cache_path,
+    follows_ny_close,
+    ny_close_offset_seconds,
+    server_epoch_to_utc,
+    server_epoch_to_utc_ny_close,
+)
 
 _TIMEFRAME_MAP = {
     Timeframe.M1: mt5.TIMEFRAME_M1,
@@ -20,6 +29,12 @@ _TIMEFRAME_MAP = {
 
 class MT5MarketDataError(RuntimeError):
     pass
+
+
+class HistoryClockMismatch(MarketDataUnavailable):
+    """The broker's measured offset is not what the New-York-close rule says it
+    should be right now, so history cannot be relabelled with that rule. Raised
+    rather than guessed: an hour's error is invisible in every downstream number."""
 
 
 class MT5MarketDataProvider(MarketDataProvider):
@@ -91,29 +106,49 @@ class MT5MarketDataProvider(MarketDataProvider):
             f"copy_rates_from_pos({symbol}, {timeframe}) failed: [{code}] {message}"
         )
 
-    def get_candles(self, symbol: str, timeframe: Timeframe, count: int) -> list[Candle]:
-        mt5_timeframe = _TIMEFRAME_MAP[timeframe]
-        raw = mt5.copy_rates_from_pos(symbol, mt5_timeframe, 0, count)
+    def _rates(self, symbol: str, timeframe: Timeframe, count: int):
+        raw = mt5.copy_rates_from_pos(symbol, _TIMEFRAME_MAP[timeframe], 0, count)
         if raw is None:
             # Read last_error() BEFORE any other MT5 call - it reports the most
             # recent one, so the diagnosis below would overwrite the reason.
             code, message = mt5.last_error()
             raw = self._retry_or_explain(symbol, timeframe, count, code, message)
+        return raw
+
+    @staticmethod
+    def _candle(symbol: str, timeframe: Timeframe, row, time) -> Candle:
+        return Candle(
+            symbol=symbol,
+            timeframe=timeframe,
+            time=time,
+            # cast explicitly - numpy scalar types (from the structured
+            # array MT5 returns) aren't JSON-serializable as-is
+            open=float(row["open"]),
+            high=float(row["high"]),
+            low=float(row["low"]),
+            close=float(row["close"]),
+            volume=float(row["tick_volume"]),
+        )
+
+    def get_candles(self, symbol: str, timeframe: Timeframe, count: int) -> list[Candle]:
+        raw = self._rates(symbol, timeframe, count)
         # Once for the whole batch: every row shares the offset, and a
-        # re-measure mid-batch could split one window across two clocks.
+        # re-measure mid-batch could split one window across two clocks. Right
+        # for the engine's recent windows; see get_history for long ones.
         offset = self._offset()
-        return [
-            Candle(
-                symbol=symbol,
-                timeframe=timeframe,
-                time=server_epoch_to_utc(row["time"], offset),
-                # cast explicitly - numpy scalar types (from the structured
-                # array MT5 returns) aren't JSON-serializable as-is
-                open=float(row["open"]),
-                high=float(row["high"]),
-                low=float(row["low"]),
-                close=float(row["close"]),
-                volume=float(row["tick_volume"]),
+        return [self._candle(symbol, timeframe, row, server_epoch_to_utc(row["time"], offset)) for row in raw]
+
+    def get_history(self, symbol: str, timeframe: Timeframe, count: int) -> list[Candle]:
+        """Every bar stamped with the offset in force when it formed (the
+        New-York-close rule, mt5_time.py) - after checking that the rule agrees
+        with the offset measured right now. If it does not, this broker is not
+        on that convention and nothing is relabelled."""
+        measured = self._offset()
+        now = datetime.now(timezone.utc)
+        if not follows_ny_close(measured, now):
+            raise HistoryClockMismatch(
+                f"broker offset measured {measured / 3600:+.2f}h, but the New-York-close rule says "
+                f"{ny_close_offset_seconds(now) / 3600:+.2f}h for now - refusing to relabel history with it"
             )
-            for row in raw
-        ]
+        raw = self._rates(symbol, timeframe, count)
+        return [self._candle(symbol, timeframe, row, server_epoch_to_utc_ny_close(row["time"])) for row in raw]

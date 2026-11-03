@@ -12,6 +12,51 @@ commission), entries filled at the next bar's open, and judged by a bootstrap
 Six strategies, five mechanisms, ~37,000 simulated trades, 3-12.7 years of real
 history per instrument. Not one produced an edge that survives retail costs.
 
+## 2026-11-03 - Every backtest so far ran part of each year an hour off
+
+**What was wrong.** MT5 stamps every bar in the broker's server time, and the
+code converted all of it to UTC with ONE offset - the one measured at run time.
+This broker's server runs on the New York close: UTC+3 while New York is on
+daylight time, UTC+2 otherwise. Its own deal records show it
+(`scripts/diagnose_clock_history.py`): +3.00h every week from 2026-07-16 to
+2026-10-26, +2.00h from 2026-11-02 - the US switch on 1 Nov, not Europe's on
+25 Oct. So every conversion labelled the other season's bars an hour off.
+
+**What it did.**
+- **Every `london_breakout` backtest tested a partly different strategy.** Its
+  rules ARE hours (Asian range 00:00-07:00, breakouts 07:00-10:00 UTC). The
+  runs made in summer (2026-08-30: -0.088R; 2026-09-16: v1 -0.060R, crosses
+  -0.132R, wide -0.052R) moved the winter months - about a third of the history
+  - an hour early. The 2026-11-03 run, made in winter, moved the summer months -
+  about two thirds - an hour late. That is why it found 1,895 trades where the
+  September run found 1,070 on the same code. Strategies that read only bar
+  sequences (EMAs, channels, ADX) are barely touched; session strategies are not.
+- **The 2026-11-03 autopsy recompute measured the hour before each pre-switch
+  trade.** The 13-Oct GBPJPY live short read "+3.1R best". On the real minute
+  bars it peaked at +0.94R (bid) - under the +1R that moves a stop to entry, so
+  the live engine was right to leave it, and the two demo trades on the same
+  setup moved theirs only because their entries put +1R closer. No stop-
+  management fault; a measurement one.
+- **The live engine and the demo lab were never affected:** they convert recent
+  bars with the offset measured now, which is right for recent bars, and every
+  signal and trade timestamp comes from the VPS clock (within 0.4s of the
+  database's).
+
+**The fix.** `MarketDataProvider.get_history()` stamps each bar with the offset
+in force when it formed (`mt5_time.server_epoch_to_utc_ny_close`), after
+checking that the New-York-close rule agrees with the offset measured now -
+refusing otherwise. The backtest, the engine's trade autopsy and the backfill
+read history through it; the backtest stops before running if the rule and the
+clock disagree. `scripts/test_clock_history.py` (17/17) replays the broker's 17
+measured weeks, 2023-2027's switch dates, and the real 13-Oct GBPJPY bars.
+
+**What it voids.** The 2026-11-03 filter test (below) and its -0.092R headline:
+a broken measurement, not a result - the test is re-run ONCE on corrected
+hours, same criteria. Every earlier london-breakout backtest figure in this log
+was measured on partly shifted sessions and should be read as such until the
+corrected re-run replaces it. The managed-vs-fixed stop comparison still stands:
+it scores the same trades both ways.
+
 ## 2026-11-03 - Pre-registered: two filters for `london_breakout_v1`, tested once
 
 Written before the backtest that tests them has been run.
@@ -54,7 +99,8 @@ edge is the open question, and against a whole-strategy result of -0.060R
 better bet, because it is the strategy's own premise rather than an accident of
 cost.
 
-**First run, 2026-11-03 - all three FAIL, but the run is ON HOLD.** 1,895 trades,
+**First run, 2026-11-03 - VOID: run on mislabelled hours (see the entry above).**
+Kept for the record; NOT a verdict. 1,895 trades,
 2023-07-07 to 2026-11-03, managed stops, net R:
 
 | Rule | Trades | Net | 95% CI | Halves |
@@ -80,7 +126,7 @@ run (in summer) produced 1,070. `scripts/diagnose_clock_history.py` reads the
 broker's offset history from its own deal records. If the offset never changed,
 these results stand as recorded. If it did, the labels get fixed and the test is
 run ONCE more with the same criteria - a repaired measurement, not a second
-look.
+look. **It did** (+3h to 26 Oct, +2h from 2 Nov): void, and re-run pending.
 
 ## 2026-11-03 - `london_breakout_wide_v1` retired
 

@@ -171,7 +171,9 @@ def main() -> int:
         notifier = types.SimpleNamespace(notify=lambda event: messages.append(event.message))
         broker = types.SimpleNamespace(get_closed_position_breakdown=lambda ticket: exit_pnl)
         return types.SimpleNamespace(broker=broker, market_data=md, notifications=[notifier])
-    good_md = types.SimpleNamespace(get_candles=lambda symbol, tf, count: path)
+    def single_offset(*a):
+        raise AssertionError("the autopsy must read history (per-bar offsets), not get_candles")
+    good_md = types.SimpleNamespace(get_history=lambda symbol, tf, count: path, get_candles=single_offset)
     db = FakeSupabase([row])
     loop = bare_loop(_engine=engine_for(good_md), _supabase=db, _account_key="icmarkets-live")
     loop._account_label = lambda: "LIVE"
@@ -194,7 +196,7 @@ def main() -> int:
     def broken_md(*a):
         raise RuntimeError("no price feed")
     db = FakeSupabase([row])
-    loop = bare_loop(_engine=engine_for(types.SimpleNamespace(get_candles=broken_md)), _supabase=db, _account_key="x")
+    loop = bare_loop(_engine=engine_for(types.SimpleNamespace(get_history=broken_md)), _supabase=db, _account_key="x")
     loop._account_label = lambda: "LIVE"
     loop._reconcile_closed_trades(open_positions=[])
     values = db.updates[-1][2]

@@ -93,6 +93,7 @@ dashboard toggles and evaluator verdicts land on a live engine with no redeploy.
 - **The engine runs via Task Scheduler on the VPS, never a Windows service/NSSM.** MT5's bridge needs an interactive desktop session; Session-0 can't provide one.
 - **Logs are per-account** (`logs/engine-<ACCOUNT_KEY>.log`). Two engines sharing a `RotatingFileHandler` corrupt it.
 - **Indicators (`engine/indicators.py`) are hand-rolled** - EMA/ATR/ADX, dependency-free on purpose.
+- **Long history is read with `get_history`, never `get_candles`.** The broker's server switches UTC+3/UTC+2 with US daylight saving; `get_candles` applies today's offset to every bar, which is right for the engine's recent windows and an hour wrong across a switch. Backtests, autopsies and anything spanning weeks must use `get_history` (per-bar offsets, verified against the measured clock). Found 2026-11-03, after every london-breakout backtest had run part of each year an hour off.
 - **`StrategyPlugin.evaluate()` returns `StrategyEvaluation(signal, reason)`** - every evaluation is logged with why, fired or not.
 - **All Telegram copy lives in `engine/reporting.py`.** One grammar: icon + headline + the number that matters, then context, then at most one line of detail. The notifier only delivers.
 - Windows-only project: PowerShell conventions, backslash paths fine, no Docker/Linux-only tooling for anything touching MT5.

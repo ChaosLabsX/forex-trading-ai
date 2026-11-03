@@ -307,7 +307,10 @@ def run_backtest_for_symbol(
     context_tfs = tuple(strategy.required_timeframes[1:])
     entry_window = WINDOW[entry_tf]
 
-    entry_all = md.get_candles(symbol, entry_tf, ENTRY_HISTORY_BARS)[:-1]  # drop forming bar
+    # get_history, not get_candles: years of bars cross many daylight-saving
+    # switches, and one offset for all of them put london_breakout's session an
+    # hour off for two thirds of every year (found 2026-11-03).
+    entry_all = md.get_history(symbol, entry_tf, ENTRY_HISTORY_BARS)[:-1]  # drop forming bar
     if len(entry_all) <= entry_window + 2:
         return []
 
@@ -318,7 +321,7 @@ def run_backtest_for_symbol(
     context_times: dict = {}
     for tf in context_tfs:
         needed = int(span_hours / TF_HOURS[tf]) + WINDOW[tf] + 2
-        bars = md.get_candles(symbol, tf, needed)[:-1]
+        bars = md.get_history(symbol, tf, needed)[:-1]
         context_bars[tf] = bars
         context_times[tf] = [c.time for c in bars]
 
@@ -576,6 +579,21 @@ def main() -> None:
     broker = MT5BrokerAdapter(settings)
     broker.connect()  # blank MT5_LOGIN -> read-only attach, no session bump
     md = MT5MarketDataProvider(settings)
+
+    # History is stamped per bar by the New-York-close rule (get_history), which
+    # is only valid if the broker's clock follows it. Checked once here so a
+    # mismatch stops the run with a reason, rather than skipping every symbol.
+    from datetime import datetime, timezone
+
+    from engine.plugins.brokers.mt5_time import follows_ny_close, ny_close_offset_seconds
+    measured = md._offset()
+    if not follows_ny_close(measured, datetime.now(timezone.utc)):
+        print(f"STOP: the broker's UTC offset is {measured / 3600:+.2f}h now, but the New-York-close rule says "
+              f"{ny_close_offset_seconds(datetime.now(timezone.utc)) / 3600:+.2f}h. Historical bars cannot be "
+              f"given their correct hours, and session strategies would be tested an hour off.")
+        raise SystemExit(2)
+    print(f"Broker clock: UTC{measured / 3600:+.0f}h now, New-York-close convention confirmed - "
+          f"every historical bar gets the offset in force when it formed.\n")
 
     # resolve_costs() takes ONE live spread snapshot and applies it to years of
     # trades. If the market is shut, bid==ask and that snapshot reads zero -

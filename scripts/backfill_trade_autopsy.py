@@ -52,7 +52,7 @@ def bars_covering(market_data, cache: dict, symbol: str, opened: datetime, now: 
         key = (symbol, timeframe)
         if key not in cache or cache[key][0] < count:  # [0] = how many were asked for
             try:
-                cache[key] = (count, market_data.get_candles(symbol, timeframe, count))
+                cache[key] = (count, market_data.get_history(symbol, timeframe, count))
             except Exception:
                 cache[key] = (count, [])
         bars = cache[key][1]
@@ -92,6 +92,7 @@ def main() -> int:
 
     import MetaTrader5 as mt5
     from engine.plugins.brokers.mt5_broker import MT5BrokerAdapter, summarize_closed_deals
+    from engine.plugins.brokers.mt5_time import server_epoch_to_utc_ny_close
     from engine.plugins.market_data.mt5_market_data import MT5MarketDataProvider
 
     broker = MT5BrokerAdapter(settings)
@@ -103,7 +104,10 @@ def main() -> int:
     try:
         for row in rows:
             ticket, symbol = row["mt5_ticket"], row["symbol"]
-            breakdown = summarize_closed_deals(mt5.history_deals_get(position=int(ticket)), broker._to_utc)
+            # Deal times on the same per-date offset as the bars (get_history):
+            # broker._to_utc applies today's offset, an hour wrong for any trade
+            # from the other side of a daylight-saving switch.
+            breakdown = summarize_closed_deals(mt5.history_deals_get(position=int(ticket)), server_epoch_to_utc_ny_close)
             if breakdown is None:
                 missing["no closing deal in MT5 history"] += 1
                 continue
