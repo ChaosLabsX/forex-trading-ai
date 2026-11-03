@@ -18,11 +18,9 @@ refusal is the product.
 
 - **Engine: live 24/7** on the VPS (`162.220.166.12`) via Task Scheduler +
   auto-login. Survives reboots unattended (verified).
-- **3 strategies** run in the demo lab across 16 instruments: `ema_trend_v1`,
-  `london_breakout_v1`, and `london_breakout_wide_v1`, a demo-only extension
-  added 2026-09-16 (pre-registered in the research log; `enabled=false` on live).
-  Five more are retired and no longer loaded, but still registered, so they can
-  be backtested.
+- **2 strategies** run in the demo lab across 16 instruments: `ema_trend_v1`
+  and `london_breakout_v1`. Six more are retired and no longer loaded, but still
+  registered, so they can be backtested.
 - **No demonstrated edge. Nothing is READY.** ~37,000 simulated trades across
   5 mechanisms and up to 12.7 years of history. See
   [`docs/research-log.md`](docs/research-log.md) - **read it before proposing a
@@ -36,14 +34,17 @@ refusal is the product.
   other strategy is `enabled=false` on live. See
   [`docs/going-live.md`](docs/going-live.md).
 - **That is a deliberate bet on a strategy that has not proven an edge**, taken
-  with the user's eyes open: `london_breakout_v1` is `almost_ready` at +0.126R
-  over 50 demo trades, which is one tenth of its own 1.24R spread. Proving that
-  edge is real would take ~369 trades (~18 months). The $200 is sized as tuition,
-  not as an investment - do not let anything in here imply the edge is settled.
+  with the user's eyes open: `london_breakout_v1` was `almost_ready` at +0.126R
+  over 50 demo trades and has since slid to +0.056R over 78 (CI [-0.21, +0.33]),
+  toward its 12.7-year backtest's -0.060R; live stood at -0.11R over 24 trades
+  (2026-11-03). Proving an edge that thin would take hundreds of trades. The
+  $200 is sized as tuition, not as an investment - do not let anything in here
+  imply the edge is settled.
 - **The demo lab keeps running regardless**, and remains the only thing that
   produces a READY verdict. Retired: `donchian_breakout_v1`,
   `donchian_trending_v1` (2026-08-30), `range_fade_v1`, `range_fade_h4_v1` and
-  `london_breakout_crosses_v1` (2026-09-16) - reasons in the research log.
+  `london_breakout_crosses_v1` (2026-09-16), `london_breakout_wide_v1`
+  (2026-11-03) - reasons in the research log.
 
 ## Hard constraint - read before proposing anything MT5-related
 

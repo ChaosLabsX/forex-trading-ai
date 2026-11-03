@@ -178,9 +178,11 @@ def main() -> int:
     passed.append(check("both load through the registry",
                         [load_plugin("strategy", key, None).name for key in NEW], list(NEW)))
     names = [s.name for s in build_engine(settings=Settings(test_mode=True)).strategies]
-    # crosses failed its backtest screen and was retired 2026-09-16: still
-    # registered (so it can be re-backtested), no longer loaded by the engine.
-    passed.append(check("wide listed in config/plugins.yaml", "london_breakout_wide_v1" in names, True))
+    # Both extensions are retired - crosses 2026-09-16 (failed its backtest
+    # screen), wide 2026-11-03 (twice the trades, each losing, as its backtest
+    # predicted). Still registered, so either can be re-backtested; no longer
+    # loaded by the engine.
+    passed.append(check("retired wide no longer loaded", "london_breakout_wide_v1" in names, False))
     passed.append(check("retired crosses no longer loaded", "london_breakout_crosses_v1" in names, False))
     passed.append(check("london_breakout_v1 still listed", "london_breakout_v1" in names, True))
 

@@ -12,6 +12,58 @@ commission), entries filled at the next bar's open, and judged by a bootstrap
 Six strategies, five mechanisms, ~37,000 simulated trades, 3-12.7 years of real
 history per instrument. Not one produced an edge that survives retail costs.
 
+## 2026-11-03 - Pre-registered: two filters for `london_breakout_v1`, tested once
+
+Written before the backtest that tests them has been run.
+
+**Where they come from.** Slicing the demo lab's london breakout trades
+(`london_breakout_v1` plus `london_breakout_wide_v1`, one count per setup: 115
+trades) and the live account's fee records turned up two patterns, each with a
+mechanism behind it:
+
+| Hypothesis | Demo evidence | Mechanism |
+|---|---|---|
+| **H1 - first London hour.** Breakouts on the bar that opens 07:00 UTC beat later ones | 07:00 +0.144R (51), 08:00 -0.130R (25), 09:00 -0.224R (22), 10:00 +0.045R (16) | the premise itself: the Asian coil releases at the open; a break hours later is more often a false one |
+| **H2 - cheap trades.** Trades whose commission is under 8% of the risk beat the rest | < 0.08R +0.185R (38), 0.08-0.12R -0.319R (29), >= 0.12R -0.232R (22) | a fixed per-lot fee eats more of R when the stop is tight - EURGBP's ~4.6-pip stop is the extreme (-0.365R over 26) |
+
+Slicing 115 trades five ways guarantees some slice looks good by chance, so these
+are hypotheses, not findings. They get ONE test each, here, on data they did not
+come from.
+
+**The test.** `scripts/backtest.py london_breakout_v1`: 16 symbols, up to 12.7
+years, stops managed as the engine manages them (the 2026-10-12 fix), run once.
+The breakdowns it prints:
+- H1: by the hour (UTC) the breakout bar opened - 07, 08, 09, 10.
+- H2: by modelled commission ($7/lot round trip) as a share of the trade's risk -
+  the same quantity the demo measured (spread excluded) - split at 0.08R.
+
+**Pass criteria, fixed now.** A rule passes only if the trades it keeps have a net
+expectancy whose 95% CI lies entirely above zero AND is positive in both
+chronological halves. Judged three ways: H1 alone ("07:00 bar only"), H2 alone
+("commission < 0.08R only"), and both together. Anything less is a fail, recorded
+here and not adjusted: no other hour, no other threshold, no second look.
+
+**What a pass would and would not mean.** A pass makes ONE rule a candidate for the
+demo lab, not for live - the demo then has to confirm it on trades it has not
+seen. A fail says the demo pattern was the noise five slices of 115 trades produce.
+
+**Prediction.** H2's gradient is partly mechanical: net R is gross minus cost, so
+cheaper trades net more by construction. Whether what survives is a positive
+edge is the open question, and against a whole-strategy result of -0.060R
+(gross +0.018R) I expect neither rule to clear the CI bar on its own. H1 is the
+better bet, because it is the strategy's own premise rather than an accident of
+cost.
+
+## 2026-11-03 - `london_breakout_wide_v1` retired
+
+Its month-long demo test (2026-09-16 pre-registration, above) is over: **58
+trades, -0.099R, CI [-0.395, +0.202]**, against `london_breakout_v1`'s +0.056R
+over 78 on the same weeks. It did what its backtest said (-0.052R over 2,129):
+about twice the trades, and the extra ones lose. Loosening the compression filter
+buys frequency, not edge. Marked `retired = true` and removed from
+`config/plugins.yaml`; still registered for backtests. Its open demo positions
+close normally.
+
 ## 2026-10-12 - The backtest now manages stops like the engine. Prediction, before the run
 
 Written before the corrected backtest has been run on real history.
@@ -295,6 +347,7 @@ so their open demo positions still close normally.
 | `range_fade_v1` | 271 trades, -0.144R, CI [-0.278, -0.008], drawdown 54.8R | net CI entirely below zero | both CIs below zero, the donchian standard |
 | `range_fade_h4_v1` | 76 trades, -0.200R, CI [-0.432, +0.048], drawdown 21.5R | CI [-0.074, -0.010] over 5,715 trades | a 12.7-year negative backtest that 76 demo trades cannot overturn, and a demo drawdown past the 15R limit. Its demo CI does NOT yet sit entirely below zero, so this rests on the backtest |
 | `london_breakout_crosses_v1` | 0 trades | -0.132R, CI [-0.202, -0.060] | failed its pre-registered screen |
+| `london_breakout_wide_v1` (2026-11-03) | 58 trades, -0.099R, CI [-0.395, +0.202] | -0.052R over 2,129 | its month-long test ended as its backtest predicted: twice the trades, no edge |
 
 `ema_trend_v1` was kept deliberately. It stands at -0.417R, but on 12 trades,
 which is noise in either direction, and retiring on that would be judging a
@@ -313,7 +366,7 @@ was already not converging.
 | `donchian_trending_v1` | Same logic, trending assets | 8,856 | −0.122R | **negative** |
 | `range_fade_h4_v1` | Same logic as `range_fade_v1`, at H4 | 5,715 | −0.042R | **negative** (retired 2026-09-16) |
 | `london_breakout_crosses_v1` | Same logic as `london_breakout_v1`, 5 EUR/GBP/CHF/CAD crosses | 1,171 | −0.132R | **negative** (CI entirely below zero; failed its pre-registered screen; retired 2026-09-16) |
-| `london_breakout_wide_v1` | `london_breakout_v1` with a 1.75x compression limit | 2,129 | −0.052R | zero (v1 re-run same day: −0.060R over 1,070) |
+| `london_breakout_wide_v1` | `london_breakout_v1` with a 1.75x compression limit | 2,129 | −0.052R | zero (v1 re-run same day: −0.060R over 1,070); retired 2026-11-03 after -0.099R over 58 demo trades |
 
 Six strategies, five mechanisms: `range_fade_h4_v1` and `donchian_trending_v1`
 are not new ideas, they are the *same* mechanism aimed at unseen data - which is

@@ -10,11 +10,6 @@ strategies:
   # is how you select noise and lose real money.
   - ema_trend_v1          # MA-crossover trend-following (too few trades to judge yet)
   - london_breakout_v1    # scheduled volatility regime shift at the London open
-  # DEMO-ONLY extension of london_breakout_v1 that moves exactly one thing
-  # (pre-registered in docs/research-log.md, 2026-09-16). It loads on the live
-  # engine too - plugins are global - but a new strategy is linked to a live
-  # account with enabled=false, so guard 3 blocks it there.
-  - london_breakout_wide_v1     # same 16 symbols, compression limit 1.75x instead of 1.5x
   #
   # RETIRED - no longer loaded, so neither engine fetches prices for them.
   # Each is still in engine/registry.py, so scripts/backtest.py can re-run it,
@@ -26,6 +21,7 @@ strategies:
   #   range_fade_v1              2026-09-16  demo CI entirely below zero (271 trades)
   #   range_fade_h4_v1           2026-09-16  backtest CI below zero, demo drawdown past 15R
   #   london_breakout_crosses_v1 2026-09-16  failed its pre-registered backtest screen
+  #   london_breakout_wide_v1    2026-11-03  2x the trades, each losing: -0.099R over 58 demo trades
 risk_engine: default
 execution_engine: default
 news_provider: forexfactory  # free ForexFactory weekly economic calendar (no
