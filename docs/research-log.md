@@ -54,6 +54,34 @@ edge is the open question, and against a whole-strategy result of -0.060R
 better bet, because it is the strategy's own premise rather than an accident of
 cost.
 
+**First run, 2026-11-03 - all three FAIL, but the run is ON HOLD.** 1,895 trades,
+2023-07-07 to 2026-11-03, managed stops, net R:
+
+| Rule | Trades | Net | 95% CI | Halves |
+|---|---|---|---|---|
+| H1: 07:00 bar only | 773 | -0.150R | [-0.227, -0.072] | -0.250 / -0.051 |
+| H2: commission < 0.08R only | 1,331 | -0.039R | [-0.099, +0.022] | -0.085 / +0.007 |
+| H1 + H2 | 519 | -0.109R | [-0.205, -0.010] | -0.256 / +0.038 |
+| every trade | 1,895 | -0.092R | [-0.144, -0.041] | -0.123 / -0.060 |
+
+By hour: 07:00 -0.150R (773), 08:00 -0.025R (512), 09:00 -0.128R (344), 10:00
+-0.003R (266). By commission: < 0.08R -0.039R (1,331), 0.08-0.12R -0.221R (492),
+>= 0.12R -0.179R (72). H1's premise is contradicted outright (the first hour is
+the WORST); H2's gradient appears, as the cost model guarantees, and stops short
+of an edge.
+
+Why on hold rather than final: reading the same day's autopsy recompute exposed
+that every bar time is converted to UTC with ONE offset - the one measured at
+run time. If this broker's server clock switches between summer and winter
+time, this run labelled one half of its history an hour off, which voids H1 and
+shifts the London session the backtest simulated for those months. It also
+fits an unexplained fact: this run produced 1,895 trades where the 2026-09-16
+run (in summer) produced 1,070. `scripts/diagnose_clock_history.py` reads the
+broker's offset history from its own deal records. If the offset never changed,
+these results stand as recorded. If it did, the labels get fixed and the test is
+run ONCE more with the same criteria - a repaired measurement, not a second
+look.
+
 ## 2026-11-03 - `london_breakout_wide_v1` retired
 
 Its month-long demo test (2026-09-16 pre-registration, above) is over: **58
@@ -105,6 +133,26 @@ If managed comes in clearly above fixed - 0.02R, prices tend to fall back after
 +1R and the move to entry is worth keeping. Clearly below, they tend to carry
 on, and the move is costing winners. Either result is recorded here; neither
 licenses tuning `breakeven_at_r` until the strategy itself passes.
+
+**Result (run 2026-11-03 on the VPS, same signals both ways): every prediction
+held.**
+
+| Prediction | Result |
+|---|---|
+| same trade count under both models | 1,895 and 1,895 |
+| 10-20% of trades end at the moved stop | 14.4% (272) |
+| managed = fixed - 0.02R, +/- 0.03R | -0.092R vs -0.090R: **-0.002R** |
+| fewer full losses, smaller max drawdown | 972 vs 1,134 losses; 200.4R vs 203.7R |
+| no edge either way | net CI [-0.144, -0.041] managed, [-0.145, -0.035] fixed |
+
+The move to entry at +1R neither helps nor hurts this strategy: it trades full
+losses for scratches and some winners for scratches in roughly equal measure,
+as a stop moved on a path with no memory should. Nothing to tune, and nothing
+to remove. The managed model is now the headline for every backtest.
+
+This comparison holds whatever the clock question below turns out to be (the
+same trades are scored both ways). The run's absolute level and its
+pre-registered hour checks do NOT yet - see the 2026-11-03 entries above.
 
 ## 2026-09-16 - Pre-registered: two `london_breakout_v1` extensions, demo only
 
