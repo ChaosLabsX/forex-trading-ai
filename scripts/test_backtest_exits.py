@@ -18,7 +18,10 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from backtest import StopManager, TradeOutcome, simulate_outcome                  # noqa: E402
+from backtest import (                                                            # noqa: E402
+    StopManager, SymbolCosts, TradeOutcome, commission_in_r, cost_in_r, preregistered_checks,
+    simulate_outcome, subset_stats,
+)
 from engine.config import Settings                                                 # noqa: E402
 from engine.core.models import Candle, Direction, Timeframe                       # noqa: E402
 from engine.plugins.execution.default_execution_engine import DefaultExecutionEngine  # noqa: E402
@@ -117,6 +120,45 @@ def main() -> int:
     f = o.as_fixed()
     passed.append(check("as_fixed: fixed result, same cost", (f.result, f.gross_r, round(f.net_r, 6), f.cost_r),
                         ("win", 1.5, 1.43, 0.07)))
+    passed.append(check("as_fixed keeps the commission share", o.as_fixed().commission_r, o.commission_r))
+
+    print("\nthe 2026-11-03 pre-registered checks")
+    costs = SymbolCosts(spread_price=0.00002, value_per_price_per_lot=100_000.0, min_stop_price=0.0,
+                        point=0.00001, available=True)
+    passed.append(check("commission share: $7 on a 10-pip stop at $10/pip = 0.07R",
+                        round(commission_in_r(costs, 0.0010), 4), 0.07))
+    passed.append(check("cost = spread + commission (0.02 + 0.07)", round(cost_in_r(costs, 0.0010), 4), 0.09))
+
+    def trade(hour, net, commission_r=0.05, day=0):
+        t = T0.replace(hour=hour) + timedelta(days=day)
+        return TradeOutcome("EURUSD", LONG, t, ENTRY, STOP, TARGET, "win" if net > 0 else "loss",
+                            net + 0.05, net, 0.05, 0.001, commission_r=commission_r)
+    steady = [trade(7, 0.8 if i % 3 else -1.0, day=i) for i in range(300)]  # +0.2R a trade, 2 wins in 3
+    st = subset_stats(steady)
+    passed.append(check("steady winner: CI above zero and both halves positive -> PASS",
+                        (st["passed"], st["lo"] > 0, st["first"] > 0, st["second"] > 0), (True, True, True, True)))
+    fades = [trade(7, 0.6, day=i) for i in range(150)] + [trade(7, -0.7, day=150 + i) for i in range(150)]
+    st = subset_stats(fades)
+    passed.append(check("good first half, bad second half -> fail even if the total is ~0",
+                        (st["passed"], st["first"] > 0, st["second"] < 0), (False, True, True)))
+    noisy = [trade(7, 1.5 if i % 2 else -1.0, day=i) for i in range(20)]
+    passed.append(check("positive mean on few trades but CI crosses zero -> fail", subset_stats(noisy)["passed"], False))
+    passed.append(check("empty subset -> no stats", subset_stats([]), None))
+
+    import io, contextlib
+    mix = [trade(7, 0.5, 0.05, day=i) for i in range(60)] + [trade(9, -1.0, 0.15, day=i) for i in range(40)]
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        preregistered_checks(mix)
+    text = out.getvalue()
+    line = lambda label: next(l for l in text.splitlines() if label in l)  # noqa: E731
+    passed.append(check("H1 table sorts by the breakout bar's hour",
+                        ("   60 trades" in line("07:00 bar  "), "   40 trades" in line("09:00 bar")), (True, True)))
+    passed.append(check("H2 table splits commission at 0.08R",
+                        ("   60 trades" in line("under 0.08R"), "   40 trades" in line("0.12R and over")), (True, True)))
+    passed.append(check("rules are judged: H1 alone passes, the whole set is not judged",
+                        (line("H1: 07:00 bar only").rstrip().endswith("PASS"),
+                         line("(every trade").rstrip().endswith(("PASS", "fail"))), (True, False)))
 
     print(f"\n{sum(passed)}/{len(passed)} checks passed")
     return 0 if all(passed) else 1

@@ -128,6 +128,10 @@ class TradeOutcome:
     # 2026-10-12, kept so the two can be compared on identical signals.
     fixed_result: str = ""
     fixed_gross_r: float = 0.0
+    # Commission alone as a share of the risk (spread excluded) - the quantity
+    # the demo lab's fee records measure, so the 2026-11-03 cost hypothesis is
+    # tested on the same footing it was found on.
+    commission_r: float = 0.0
 
     def as_fixed(self) -> "TradeOutcome":
         return replace(self, result=self.fixed_result, gross_r=self.fixed_gross_r,
@@ -174,6 +178,13 @@ def min_tradeable_stop(costs: SymbolCosts) -> float:
         costs.point * 10.0,          # ~1 pip on a 5-digit FX pair
     )
     return floor
+
+
+def commission_in_r(costs: SymbolCosts, risk_price: float) -> float:
+    """The round-trip commission alone, as a fraction of 1R (lot-size free)."""
+    if risk_price <= 0 or not costs.available or costs.value_per_price_per_lot <= 0:
+        return 0.0
+    return COMMISSION_PER_LOT_ROUNDTURN / (risk_price * costs.value_per_price_per_lot)
 
 
 def cost_in_r(costs: SymbolCosts, risk_price: float) -> float:
@@ -372,6 +383,7 @@ def run_backtest_for_symbol(
             signal.direction, entry_fill, signal.stop_loss, signal.take_profit, future
         )
         cost_r = cost_in_r(costs, risk_price)
+        commission_r = commission_in_r(costs, risk_price)
         outcomes.append(
             TradeOutcome(
                 symbol=symbol,
@@ -387,6 +399,7 @@ def run_backtest_for_symbol(
                 risk_price=risk_price,
                 fixed_result=fixed_result,
                 fixed_gross_r=fixed_gross_r,
+                commission_r=commission_r,
             )
         )
     if untradeable:
@@ -463,6 +476,77 @@ def summarize(label: str, outcomes: list[TradeOutcome]) -> None:
     )
     if glo > 0 and lo <= 0:
         print("     ^ the idea predicts price, but costs exceed what it predicts")
+    print()
+
+
+# --- pre-registered checks (docs/research-log.md, 2026-11-03) -----------------
+#
+# Two filters suggested by slicing the demo lab's london breakout trades, tested
+# ONCE here on history they did not come from. The criteria were written down
+# before the first run and are not to be adjusted after it: no other hour, no
+# other threshold. Judged on the managed-stop outcomes (how the engine trades).
+
+PREREG_FIRST_HOUR = 7  # UTC hour the breakout bar opens - the London open
+PREREG_COMMISSION_CAP = 0.08  # commission as a share of the risk
+
+
+def subset_stats(outcomes: list[TradeOutcome]) -> dict | None:
+    """Net expectancy, its bootstrap CI and the chronological halves of a subset
+    (outcomes must be in time order), and whether it meets the pre-registered
+    bar: CI entirely above zero AND both halves positive."""
+    if not outcomes:
+        return None
+    net = [o.net_r for o in outcomes]
+    lo, hi = bootstrap_expectancy_ci(net)
+    mid = len(net) // 2
+    first = statistics.mean(net[:mid]) if mid else float("nan")
+    second = statistics.mean(net[mid:])
+    return {
+        "n": len(net),
+        "mean": statistics.mean(net),
+        "lo": lo,
+        "hi": hi,
+        "first": first,
+        "second": second,
+        "wins": sum(1 for o in outcomes if o.result == "win") / len(net),
+        "passed": lo > 0 and first > 0 and second > 0,
+    }
+
+
+def _subset_line(label: str, outcomes: list[TradeOutcome], judged: bool = False) -> None:
+    st = subset_stats(outcomes)
+    if st is None:
+        print(f"    {label:32s}     0 trades")
+        return
+    verdict = ("   PASS" if st["passed"] else "   fail") if judged else ""
+    print(
+        f"    {label:32s} {st['n']:5d} trades  {st['mean']:+.3f}R  CI [{st['lo']:+.3f}, {st['hi']:+.3f}]"
+        f"  halves {st['first']:+.3f} / {st['second']:+.3f}  wins {100 * st['wins']:.0f}%{verdict}"
+    )
+
+
+def preregistered_checks(outcomes: list[TradeOutcome]) -> None:
+    print("=" * 60)
+    print("PRE-REGISTERED CHECKS (docs/research-log.md, 2026-11-03) - net R, managed stops")
+    print("A rule PASSES only if its CI is entirely above zero AND both halves are positive.\n")
+    print("  H1 - by the hour (UTC) the breakout bar opened:")
+    for hour in (7, 8, 9, 10):
+        _subset_line(f"{hour:02d}:00 bar", [o for o in outcomes if o.entry_time.hour == hour])
+    other = [o for o in outcomes if o.entry_time.hour not in (7, 8, 9, 10)]
+    if other:
+        _subset_line("any other hour", other)
+    print("\n  H2 - by commission as a share of the risk:")
+    _subset_line("under 0.08R", [o for o in outcomes if o.commission_r < 0.08])
+    _subset_line("0.08R - 0.12R", [o for o in outcomes if 0.08 <= o.commission_r < 0.12])
+    _subset_line("0.12R and over", [o for o in outcomes if o.commission_r >= 0.12])
+    print("\n  The rules, judged:")
+    first_hour = [o for o in outcomes if o.entry_time.hour == PREREG_FIRST_HOUR]
+    cheap = [o for o in outcomes if o.commission_r < PREREG_COMMISSION_CAP]
+    both = [o for o in first_hour if o.commission_r < PREREG_COMMISSION_CAP]
+    _subset_line("H1: 07:00 bar only", first_hour, judged=True)
+    _subset_line("H2: commission < 0.08R only", cheap, judged=True)
+    _subset_line("H1 + H2 together", both, judged=True)
+    _subset_line("(every trade, for reference)", outcomes)
     print()
 
 
@@ -595,6 +679,8 @@ def main() -> None:
     print("  - One broker, one account, one historical path. Demo spreads differ from live.")
     print("  - Parameters were NOT optimised here, but this is still in-sample, not walk-forward.")
     print("  - A positive, tight, above-zero CI means 'worth forward-testing', not 'guaranteed'.")
+    print()
+    preregistered_checks(all_outcomes)
 
 
 if __name__ == "__main__":
