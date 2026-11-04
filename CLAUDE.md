@@ -34,12 +34,14 @@ refusal is the product.
   other strategy is `enabled=false` on live. See
   [`docs/going-live.md`](docs/going-live.md).
 - **That is a deliberate bet on a strategy that has not proven an edge**, taken
-  with the user's eyes open: `london_breakout_v1` was `almost_ready` at +0.126R
-  over 50 demo trades and has since slid to +0.056R over 78 (CI [-0.21, +0.33]),
-  toward its 12.7-year backtest's -0.060R; live stood at -0.11R over 24 trades
-  (2026-11-03). Proving an edge that thin would take hundreds of trades. The
-  $200 is sized as tuition, not as an investment - do not let anything in here
-  imply the edge is settled.
+  with the user's eyes open - and the evidence has since turned against it. Its
+  first backtest on the right hours, traded exactly as the engine trades it,
+  LOSES: -0.074R over 1,302 trades, CI [-0.135, -0.013], entirely below zero,
+  and both pre-registered filters fail (2026-11-04, research log). Demo (+0.098R
+  over 81, CI [-0.16, +0.36]) and live (+0.062R over 27, +$2.30) sit inside
+  their noise of that. Whether live keeps trading it is the owner's decision -
+  ask, never toggle it unasked. The $200 is sized as tuition, not as an
+  investment - do not let anything in here imply the edge is settled.
 - **The demo lab keeps running regardless**, and remains the only thing that
   produces a READY verdict. Retired: `donchian_breakout_v1`,
   `donchian_trending_v1` (2026-08-30), `range_fade_v1`, `range_fade_h4_v1` and

@@ -11,6 +11,41 @@ commission), entries filled at the next bar's open, and judged by a bootstrap
 
 Six strategies, five mechanisms, ~37,000 simulated trades, 3-12.7 years of real
 history per instrument. Not one produced an edge that survives retail costs.
+The one funded on live, `london_breakout_v1`, has now been backtested exactly as
+it trades, and its CI sits entirely below zero (2026-11-04, next).
+
+## 2026-11-04 - `london_breakout_v1`, tested exactly as it trades: it loses after costs
+
+The corrected re-run (VPS, `scripts/backtest.py london_breakout_v1`, output kept
+there in `logs/backtest-lbo-corrected.txt`) is the first backtest of this
+strategy on the right hours - each bar on the clock in force when it formed -
+with the engine's own stop management. 16 symbols, **1,302 trades**, 2023-07-24
+to 2026-11-03 (397 a year):
+
+| Stops | Net | 95% CI | Halves | Gross |
+|---|---|---|---|---|
+| managed (as traded) | **-0.074R** | **[-0.135, -0.013]** | -0.080 / -0.068 | +0.009R, CI [-0.052, +0.070] |
+| fixed | -0.077R | [-0.143, -0.010] | | +0.006R |
+
+- **Before costs it is a coin flip; costs make it a loser.** Gross +0.009R a
+  trade with a CI straddling zero: no signal. Spread and commission take 108R
+  over the run - 0.083R a trade - and push the net CI entirely below zero.
+  Profit factor 0.87, max drawdown 121R, and both halves lose by about the same.
+- **Both pre-registered filters fail** (the 2026-11-03 pre-registration, below).
+  Nothing inside the strategy rescues it.
+- **The demo and live accounts agree with it, inside their noise.** Demo +0.098R
+  over 81 trades (CI [-0.158, +0.362]); live +0.062R over 27 (CI [-0.377,
+  +0.506]), +$2.30. Both intervals contain -0.074R. Four months above a 3.3-year
+  average is what noise does at these sizes: for live results alone to show a
+  -0.074R edge is not zero would take roughly 900 trades - over five years at
+  the live pace.
+- **No version of the clock gave it an edge.** The summer run said -0.060R over
+  1,070, the void winter run -0.092R over 1,895; the right hours land between.
+
+What this means for live is the owner's decision, recorded here when made. What
+it does not license is trying other hours, thresholds or exits until some slice
+would have worked. The 10:00 bar's +0.024R (174 trades, halves +0.147 / -0.098)
+is exactly such a slice, and the standing rule exists because of them.
 
 ## 2026-11-03 - Every backtest so far ran part of each year an hour off
 
@@ -55,7 +90,16 @@ a broken measurement, not a result - the test is re-run ONCE on corrected
 hours, same criteria. Every earlier london-breakout backtest figure in this log
 was measured on partly shifted sessions and should be read as such until the
 corrected re-run replaces it. The managed-vs-fixed stop comparison still stands:
-it scores the same trades both ways.
+it scores the same trades both ways. **Re-run 2026-11-04** (the entry above):
+`london_breakout_v1` -0.074R over 1,302, both filters fail. The retired London
+variants (crosses, wide) were not re-run; their figures stay shifted.
+
+**The autopsy, recomputed 2026-11-04** on per-bar offsets: 950 demo and 27 live
+trades. The 13-Oct GBPJPY live short now reads "full stop, best was +0.9R", and
+the two demo trades on that setup "stop at entry, best +1.6R / +1.5R". Full
+stops claiming a best beyond +1.2R - impossible when the stop moves at +1R -
+are down to 10 of 702 stop and scratch exits, none since September: mostly
+July-August, where minute history no longer reaches and 5-minute bars stand in.
 
 ## 2026-11-03 - Pre-registered: two filters for `london_breakout_v1`, tested once
 
@@ -126,7 +170,30 @@ run (in summer) produced 1,070. `scripts/diagnose_clock_history.py` reads the
 broker's offset history from its own deal records. If the offset never changed,
 these results stand as recorded. If it did, the labels get fixed and the test is
 run ONCE more with the same criteria - a repaired measurement, not a second
-look. **It did** (+3h to 26 Oct, +2h from 2 Nov): void, and re-run pending.
+look. **It did** (+3h to 26 Oct, +2h from 2 Nov): void.
+
+**Corrected run, 2026-11-04 - the verdict: all three FAIL.** Same code, same
+criteria, each bar on the clock in force when it formed. 1,302 trades,
+2023-07-24 to 2026-11-03, managed stops, net R:
+
+| Rule | Trades | Net | 95% CI | Halves | |
+|---|---|---|---|---|---|
+| H1: 07:00 bar only | 584 | -0.084R | [-0.173, +0.006] | -0.137 / -0.031 | fail |
+| H2: commission < 0.08R only | 966 | -0.036R | [-0.106, +0.034] | -0.055 / -0.017 | fail |
+| H1 + H2 | 438 | -0.038R | [-0.142, +0.072] | -0.104 / +0.028 | fail |
+| every trade | 1,302 | -0.074R | [-0.135, -0.013] | -0.080 / -0.068 | |
+
+By hour: 07:00 -0.084R (584), 08:00 -0.109R (312), 09:00 -0.077R (232), 10:00
++0.024R (174, halves +0.147 / -0.098). By commission: < 0.08R -0.036R (966),
+0.08-0.12R -0.198R (303), >= 0.12R -0.049R (33).
+
+Against the prediction: neither rule cleared the bar, as expected, but H1 was
+not the better bet. The first London hour does no better than the session as a
+whole (-0.084R against -0.074R), so the premise H1 rested on is not in the data.
+H2 came closer only for the reason the prediction gave - net is gross minus
+cost, so the cheapest trades lose least - and even they lose. Recorded, not
+adjusted: no other hour, no other threshold. The demo pattern was the noise
+that five slices of 115 trades produce.
 
 ## 2026-11-03 - `london_breakout_wide_v1` retired
 
@@ -196,9 +263,10 @@ losses for scratches and some winners for scratches in roughly equal measure,
 as a stop moved on a path with no memory should. Nothing to tune, and nothing
 to remove. The managed model is now the headline for every backtest.
 
-This comparison holds whatever the clock question below turns out to be (the
-same trades are scored both ways). The run's absolute level and its
-pre-registered hour checks do NOT yet - see the 2026-11-03 entries above.
+This comparison held whatever the clock turned out to be (the same trades are
+scored both ways), and the corrected-hours re-run (2026-11-04) repeats it:
+managed -0.074R vs fixed -0.077R (+0.003R), 202 of 1,302 trades (15.5%) at the
+moved stop, 655 vs 778 full losses, drawdown 121.0R vs 128.6R.
 
 ## 2026-09-16 - Pre-registered: two `london_breakout_v1` extensions, demo only
 
