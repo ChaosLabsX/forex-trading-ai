@@ -624,6 +624,30 @@ rewrites `trades.stop_loss`, so the original risk distance is gone by the time
 a trade closes. Trades without `risk_amount` (anything opened before this) are
 excluded from R statistics rather than guessed at.
 
+## The concurrent-trades cap must count what this pass has already opened
+
+`max_concurrent_trades` is checked against the strategy's open positions. Those
+were read once per candle pass, before the first symbol, so every symbol of the
+pass was checked against the same snapshot: signals firing on one bar each saw
+"0 open", and the cap bound only *between* passes.
+
+Found 2026-11-13 in the live account's records. On 2026-11-10 08:00, with
+`MAX_CONCURRENT_TRADES=2`, four longs opened on one bar (EURJPY, EURAUD,
+GBPAUD, CADJPY) and all four stopped out: -4.4R, 2.6% of equity, in an hour. On
+2026-10-19 the same cap had refused a third trade - only because that signal
+arrived one pass later. Same-bar clusters are the london breakout's normal
+shape, so the cap was missing exactly when it mattered. The consecutive-loss
+breaker could not help: it counts closed trades, and these were all open.
+
+**Fix:** `EngineLoop._open_trade` records each position it opens
+(`_opened_this_pass`, and its owner), and `_positions_of` adds them to the
+snapshot, so the next symbol of the pass sees them. Reset at each new snapshot,
+so nothing is counted twice. It applies to the demo lab as well (cap 4 per
+strategy) - that is the rule as written, now enforced.
+
+`scripts/test_concurrent_cap.py` (10/10) replays that morning through the real
+pass, risk engine and execution engine; it fails on the code before the fix.
+
 ## Known, deliberate gaps (not bugs - documented so they aren't "discovered" again)
 
 - **News blackout is a best-effort filter, not a guarantee.**

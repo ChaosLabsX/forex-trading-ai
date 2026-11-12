@@ -149,7 +149,8 @@ def main() -> int:
     )
     loop = bare_loop(_paused=False, _engine=types.SimpleNamespace(strategies=[strategy]),
                      _gate=types.SimpleNamespace(gate=lambda names: Gate(frozenset({"london_breakout_v1"}), {}, None)),
-                     _logged_blocks={}, _last_evaluated_bar={}, _ticket_owner={}, _pending_reviews=[])
+                     _logged_blocks={}, _last_evaluated_bar={}, _ticket_owner={}, _opened_this_pass=[],
+                     _pending_reviews=[])
     loop._log_signal = lambda name, symbol, ev: {"EURGBP": 1, "GBPJPY": 2}[symbol]
     loop._route_through_risk_engine = lambda name, sig, acct, pos, sid: (events.append(("order", sig.symbol)), (True, "ok"))[1]
     loop._update_signal_risk = lambda *a: None

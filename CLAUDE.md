@@ -37,9 +37,9 @@ refusal is the product.
   with the user's eyes open - and the evidence has since turned against it. Its
   first backtest on the right hours, traded exactly as the engine trades it,
   LOSES: -0.074R over 1,302 trades, CI [-0.135, -0.013], entirely below zero,
-  and both pre-registered filters fail (2026-11-04, research log). Demo (+0.098R
-  over 81, CI [-0.16, +0.36]) and live (+0.062R over 27, +$2.30) sit inside
-  their noise of that. Whether live keeps trading it is the owner's decision -
+  and both pre-registered filters fail (2026-11-04, research log). As of
+  2026-11-13 demo (-0.011R over 91, CI [-0.25, +0.24], now `not_ready`) and live
+  (-0.132R over 35, -$5.50, equity ~$223) agree with it in sign. Whether live keeps trading it is the owner's decision -
   ask, never toggle it unasked. The $200 is sized as tuition, not as an
   investment - do not let anything in here imply the edge is settled.
 - **The demo lab keeps running regardless**, and remains the only thing that

@@ -172,6 +172,8 @@ class EngineLoop:
         self._logged_blocks: dict[str, str] = {}
         # broker ticket -> owning strategy, refreshed each cycle from `trades`
         self._ticket_owner: dict[str, str] = {}
+        # Positions opened during the current candle pass - see _positions_of.
+        self._opened_this_pass: list[Position] = []
         # (symbol, timeframe) -> time of the newest CLOSED candle already stored.
         # Only the demo lab stores candles (the live engine would write the same
         # rows again), only closed bars, and all of a pass's new bars in one
@@ -441,6 +443,7 @@ class EngineLoop:
         broker = self._engine.broker
         account_state = None
         open_positions: list = []
+        self._opened_this_pass = []  # the snapshot below already holds every earlier one
         if broker is not None:
             try:
                 account_state = broker.get_account_state()
@@ -609,7 +612,20 @@ class EngineLoop:
         self._ticket_owner = {r["mt5_ticket"]: r["strategy_name"] for r in rows}
 
     def _positions_of(self, strategy_name: str, open_positions: list) -> list:
-        return [p for p in open_positions if self._ticket_owner.get(p.id) == strategy_name]
+        """This strategy's open positions: the pass's snapshot PLUS whatever
+        this pass has opened since it was taken.
+
+        The snapshot is read once, before the first symbol. Every symbol of a
+        pass was then checked against it, so signals firing on the same bar
+        each saw "0 open" and max_concurrent_trades did not bind inside a pass
+        - only across passes. On 2026-11-10 08:00 the live account, capped at
+        2, opened four correlated longs on one bar; all four stopped out
+        (-4.4R, 2.6% of equity, in one hour). Same-bar clusters are the
+        london breakout's normal shape, so this is exactly when the cap is
+        needed."""
+        seen = {p.id for p in open_positions}
+        fresh = [p for p in self._opened_this_pass if p.id not in seen]
+        return [p for p in (*open_positions, *fresh) if self._ticket_owner.get(p.id) == strategy_name]
 
     def _process_commands(self) -> None:
         try:
@@ -1004,6 +1020,10 @@ class EngineLoop:
                 f"error - recovered as ticket {position.id}.",
             )
 
+        # Count it against this strategy's cap for the rest of the pass, before
+        # anything that can fail: the position exists at the broker either way.
+        self._ticket_owner[position.id] = strategy_name
+        self._opened_this_pass.append(position)
         self._persist_opened_trade(strategy_name, position, signal_id)
 
     @staticmethod

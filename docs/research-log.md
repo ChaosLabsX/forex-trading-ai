@@ -14,6 +14,46 @@ history per instrument. Not one produced an edge that survives retail costs.
 The one funded on live, `london_breakout_v1`, has now been backtested exactly as
 it trades, and its CI sits entirely below zero (2026-11-04, next).
 
+## 2026-11-13 - Full audit: live is now net negative, and the cap did not bind on one bar
+
+A whole-system audit against the accounts' own records. No strategy, threshold
+or parameter was changed; nothing here is a variant.
+
+| `london_breakout_v1` | Trades | Net | 95% CI | PF | Net P&L |
+|---|---|---|---|---|---|
+| live | 35 | **-0.132R** | [-0.503, +0.250] | 0.78 | **-$5.50** |
+| demo (after the void below) | 91 | **-0.011R** | [-0.253, +0.235] | 0.98 | |
+| backtest, as traded | 1,302 | -0.074R | [-0.135, -0.013] | 0.87 | |
+
+- **The "+$2.30 over 27" has gone.** Eight more live trades took it to -$5.50.
+  Live, demo and backtest now agree in sign, and both account intervals still
+  contain -0.074R. Live gross is -0.045R a trade and commission a median 0.083R
+  - the backtest's cost figure, measured on real fills.
+- **Execution is not the problem.** Entry slippage: median +0.012R live (p90
+  +0.087R), +0.007R demo. Stops return about -1.1R and targets +1.4R on both
+  accounts. No heartbeat gap during market hours in the last 30 days. There is
+  no execution fix that turns a gross of about zero into an edge.
+- **The demo's one spurious trade was still being counted.** The 2026-09-09
+  01:00 EURUSD +1.78R - recorded below as fired on a 7-hours-wrong clock, with
+  the instruction to exclude it from the verdict - had never been voided. It is
+  now (`void_reason`, trade 873). Without it the demo expectancy is negative and
+  the verdict is `not_ready`, not `almost_ready`: that one trade was the whole
+  of the strategy's standing in the lab.
+- **`max_concurrent_trades` did not bind inside a pass** - a bug, fixed
+  (`docs/safety-rails.md`, `scripts/test_concurrent_cap.py`). On 2026-11-10
+  08:00 the live account, capped at 2, opened four correlated longs on one bar;
+  all four stopped out, -4.4R and 2.6% of equity in an hour. With the cap
+  working, two of them (-$3.27) are refused. This is a risk fix, not an edge:
+  the same rule would have refused winners on another morning.
+- **Sizing is at the broker's floor.** Live equity is ~$223 (it was ~$450 until
+  early November), so 0.75% is ~$1.67 and most trades are the 0.01-lot minimum.
+  Rounding down means the money at risk now varies from about 0.4% to 0.7% a trade,
+  and a setup whose stop costs more than $1.67 at 0.01 lots is refused outright.
+
+What the audit does NOT license, by the standing rule: dropping EURGBP (live
+-0.56R over 11, demo -0.34R over 22) or any symbol by its results, another hour,
+another exit. H2 already tested the cost mechanism behind EURGBP and failed.
+
 ## 2026-11-04 - `london_breakout_v1`, tested exactly as it trades: it loses after costs
 
 The corrected re-run (VPS, `scripts/backtest.py london_breakout_v1`, output kept
