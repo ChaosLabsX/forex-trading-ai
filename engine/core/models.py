@@ -55,7 +55,7 @@ class Signal:
     timeframe: Timeframe
     entry_price: float
     stop_loss: float
-    take_profit: float
+    take_profit: float | None  # None: no target, the stop is the only exit
     reason: str
     metadata: dict = field(default_factory=dict)
 

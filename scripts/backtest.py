@@ -51,6 +51,7 @@ import statistics
 import sys
 from bisect import bisect_right
 from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import MetaTrader5 as mt5
@@ -61,6 +62,7 @@ from engine.config import Settings
 from engine.core.interfaces.strategy import StrategyContext, StrategyPlugin
 from engine.core.models import AccountState, Direction, Position, PositionStatus, Tick, Timeframe
 from engine.plugins.brokers.mt5_broker import MT5BrokerAdapter
+from engine.plugins.brokers.mt5_time import ny_close_offset_seconds
 from engine.plugins.execution.default_execution_engine import DefaultExecutionEngine
 from engine.plugins.market_data.mt5_market_data import MT5MarketDataProvider
 from engine.registry import PLUGIN_REGISTRY, load_plugin
@@ -81,7 +83,14 @@ TF_HOURS = {
     Timeframe.D1: 24.0,
 }
 ENTRY_HISTORY_BARS = 20_000  # ask big; the broker returns what it has
-MAX_HOLD_BARS = 200  # give up on a trade that never resolves within ~8 trading days
+# Give up on a trade that never resolves within ~8 trading days of H1 bars. The
+# engine has no such limit, so a strategy built to hold for weeks declares its
+# own (`backtest_max_hold_bars`) rather than have its winners cut off here.
+MAX_HOLD_BARS = 200
+
+# MT5's SYMBOL_SWAP_MODE_* values: how a symbol's overnight financing is quoted.
+SWAP_DISABLED, SWAP_POINTS, SWAP_BASE_CURRENCY, SWAP_MARGIN_CURRENCY, SWAP_DEPOSIT_CURRENCY = 0, 1, 2, 3, 4
+SWAP_PCT_OF_CURRENT_PRICE, SWAP_PCT_OF_OPEN_PRICE = 5, 6
 
 # IC Markets "Raw Spread" charges commission separately from the (near-zero)
 # spread: ~$3.50 per lot per side, i.e. ~$7 round-turn per 1.0 lot. Override
@@ -89,6 +98,16 @@ MAX_HOLD_BARS = 200  # give up on a trade that never resolves within ~8 trading 
 # produces is lot-size-independent (see _cost_in_r), so this stays valid no
 # matter what lot the live risk engine actually sizes.
 COMMISSION_PER_LOT_ROUNDTURN = 7.0
+# ...and only on these. Measured from 2,060 of the demo account's own deals
+# (2026-11-13): $3.50 a lot a side on every FX pair and metal, $0.00 on every
+# index, energy and crypto deal. Charging $7 a lot everywhere made a small-
+# contract index cost most of its own risk. Matched against symbol_info().path.
+COMMISSIONED_PATHS = ("Forex\\", "Commodities\\Metal")
+
+
+def commission_for(path: str) -> float:
+    """Round-turn commission per 1.0 lot for a symbol, from its broker group."""
+    return COMMISSION_PER_LOT_ROUNDTURN if path.startswith(COMMISSIONED_PATHS) else 0.0
 
 PLACEHOLDER_ACCOUNT = AccountState(
     balance=10_000.0,
@@ -109,6 +128,23 @@ class SymbolCosts:
     min_stop_price: float  # broker's own minimum stop distance, in price units
     point: float
     available: bool  # False if symbol_info was missing - costs then default to spread only
+    # Overnight financing per calendar night, signed as the broker states it
+    # (negative = the position pays). Either a price amount per unit, or a
+    # yearly percentage of the price - brokers quote FX the first way and
+    # indices the second. See swap_terms().
+    swap_long_price: float = 0.0
+    swap_short_price: float = 0.0
+    swap_long_pct: float = 0.0
+    swap_short_pct: float = 0.0
+    swap_known: bool = True  # False: quoted in a way this model cannot price
+    commission_per_lot: float = COMMISSION_PER_LOT_ROUNDTURN  # round turn; see commission_for
+
+
+@dataclass(frozen=True)
+class SimResult:
+    result: str  # "win" | "loss" | "moved_stop" | "timeout"
+    gross_r: float
+    bars_held: int  # bars walked, counting the one the trade ended in
 
 
 @dataclass
@@ -132,10 +168,58 @@ class TradeOutcome:
     # the demo lab's fee records measure, so the 2026-11-03 cost hypothesis is
     # tested on the same footing it was found on.
     commission_r: float = 0.0
+    # Overnight financing over the nights the trade was held, in R, signed
+    # (negative = paid). Already inside net_r.
+    swap_r: float = 0.0
+    fixed_swap_r: float = 0.0
 
     def as_fixed(self) -> "TradeOutcome":
         return replace(self, result=self.fixed_result, gross_r=self.fixed_gross_r,
-                       net_r=self.fixed_gross_r - self.cost_r)
+                       swap_r=self.fixed_swap_r,
+                       net_r=self.fixed_gross_r - self.cost_r + self.fixed_swap_r)
+
+
+def swap_terms(mode: int, swap_long: float, swap_short: float, point: float,
+               value_per_price: float, contract_size: float = 0.0,
+               quoted_in_profit_currency: bool = False) -> tuple[float, float, float, float, bool]:
+    """(long price/night, short price/night, long %/year, short %/year, known)
+    from the broker's swap quote. A mode this cannot price returns known=False
+    with zeros - reported, never guessed."""
+    if mode == SWAP_DISABLED:
+        return 0.0, 0.0, 0.0, 0.0, True
+    if mode == SWAP_POINTS:
+        return swap_long * point, swap_short * point, 0.0, 0.0, True
+    if mode in (SWAP_BASE_CURRENCY, SWAP_MARGIN_CURRENCY) and quoted_in_profit_currency and contract_size > 0:
+        # Money per 1.0 lot per night, in the currency the price itself is in
+        # (how this broker quotes stock indices): per unit, that IS a price.
+        return swap_long / contract_size, swap_short / contract_size, 0.0, 0.0, True
+    if mode == SWAP_DEPOSIT_CURRENCY and value_per_price > 0:
+        # money per 1.0 lot per night -> the price move worth that much
+        return swap_long / value_per_price, swap_short / value_per_price, 0.0, 0.0, True
+    if mode in (SWAP_PCT_OF_CURRENT_PRICE, SWAP_PCT_OF_OPEN_PRICE):
+        return 0.0, 0.0, swap_long, swap_short, True
+    return 0.0, 0.0, 0.0, 0.0, False
+
+
+def nights_held(entry_utc: datetime, exit_utc: datetime) -> int:
+    """Broker midnights between entry and exit - the rollovers a position paid
+    financing at. Calendar days on purpose: the broker charges three nights on
+    one weekday to cover the weekend, so the total is one a calendar day."""
+    def server_date(utc: datetime):
+        return (utc + timedelta(seconds=ny_close_offset_seconds(utc))).date()
+    return max((server_date(exit_utc) - server_date(entry_utc)).days, 0)
+
+
+def swap_in_r(costs: SymbolCosts, direction: Direction, entry_price: float,
+              risk_price: float, nights: int) -> float:
+    """Financing over `nights`, as a fraction of 1R; negative = paid."""
+    if risk_price <= 0 or nights <= 0:
+        return 0.0
+    is_long = direction == Direction.LONG
+    per_night = costs.swap_long_price if is_long else costs.swap_short_price
+    pct = costs.swap_long_pct if is_long else costs.swap_short_pct
+    per_night += entry_price * pct / 100.0 / 360.0
+    return nights * per_night / risk_price
 
 
 def resolve_costs(symbol: str) -> SymbolCosts:
@@ -150,12 +234,27 @@ def resolve_costs(symbol: str) -> SymbolCosts:
     spread_price = info.spread * info.point  # info.spread is a point count (snapshot)
     tick_size = info.trade_tick_size or info.point
     value_per_price = (info.trade_tick_value / tick_size) if tick_size else 0.0
+    swap_currency = {SWAP_BASE_CURRENCY: info.currency_base, SWAP_MARGIN_CURRENCY: info.currency_margin}
+    long_price, short_price, long_pct, short_pct, swap_known = swap_terms(
+        info.swap_mode, info.swap_long, info.swap_short, info.point, value_per_price,
+        contract_size=info.trade_contract_size,
+        quoted_in_profit_currency=swap_currency.get(info.swap_mode) == info.currency_profit,
+    )
+    if not swap_known:
+        print(f"  WARNING: {symbol} quotes overnight financing in a mode this model cannot "
+              f"price (swap_mode {info.swap_mode}) - financing is NOT charged for it")
     return SymbolCosts(
         spread_price=spread_price,
         value_per_price_per_lot=value_per_price,
         min_stop_price=info.trade_stops_level * info.point,
         point=info.point,
         available=True,
+        swap_long_price=long_price,
+        swap_short_price=short_price,
+        swap_long_pct=long_pct,
+        swap_short_pct=short_pct,
+        swap_known=swap_known,
+        commission_per_lot=commission_for(info.path),
     )
 
 
@@ -184,7 +283,7 @@ def commission_in_r(costs: SymbolCosts, risk_price: float) -> float:
     """The round-trip commission alone, as a fraction of 1R (lot-size free)."""
     if risk_price <= 0 or not costs.available or costs.value_per_price_per_lot <= 0:
         return 0.0
-    return COMMISSION_PER_LOT_ROUNDTURN / (risk_price * costs.value_per_price_per_lot)
+    return costs.commission_per_lot / (risk_price * costs.value_per_price_per_lot)
 
 
 def cost_in_r(costs: SymbolCosts, risk_price: float) -> float:
@@ -195,11 +294,7 @@ def cost_in_r(costs: SymbolCosts, risk_price: float) -> float:
     converts it to R and the lot size cancels out, so this holds for any lot."""
     if risk_price <= 0:
         return 0.0
-    spread_r = costs.spread_price / risk_price
-    commission_r = 0.0
-    if costs.available and costs.value_per_price_per_lot > 0:
-        commission_r = COMMISSION_PER_LOT_ROUNDTURN / (risk_price * costs.value_per_price_per_lot)
-    return spread_r + commission_r
+    return costs.spread_price / risk_price + commission_in_r(costs, risk_price)
 
 
 class _PaperBroker:
@@ -260,38 +355,74 @@ def simulate_outcome(
     counts from that point on - for the rest of the bar (if it closes beyond the
     new stop, the stop was hit on the way there) and for every later bar. Without
     one, the stop stays where the strategy put it, as before 2026-10-12."""
+    sim = simulate_trade(direction, entry_price, stop_loss, take_profit, future_bars, manager)
+    return sim.result, sim.gross_r
+
+
+def simulate_trade(
+    direction: Direction,
+    entry_price: float,
+    stop_loss: float,
+    take_profit: float | None,
+    future_bars,
+    manager: StopManager | None = None,
+    max_hold_bars: int = MAX_HOLD_BARS,
+) -> SimResult:
+    """simulate_outcome, also saying how many bars the trade lasted - which is
+    what lets the caller keep one position per symbol and charge financing for
+    the nights held. `take_profit=None` is a trade with no target: it ends at
+    its stop (wherever the engine has moved it to) or at the hold limit."""
     risk = abs(entry_price - stop_loss)
     if risk <= 0:
-        return "loss", -1.0
+        return SimResult("loss", -1.0, 0)
     is_long = direction == Direction.LONG
     position = manager.open(direction, entry_price, stop_loss, take_profit) if manager else None
     stop = stop_loss
 
-    def stopped_out() -> tuple[str, float]:
+    def stopped_out(bars: int) -> SimResult:
         if stop == stop_loss:
-            return "loss", -1.0
+            return SimResult("loss", -1.0, bars)
         signed = (stop - entry_price) if is_long else (entry_price - stop)
-        return "moved_stop", signed / risk
+        return SimResult("moved_stop", signed / risk, bars)
 
     last_close = entry_price
-    for bar in future_bars[:MAX_HOLD_BARS]:
+    held = 0
+    for held, bar in enumerate(future_bars[:max_hold_bars], start=1):
         last_close = bar.close
         worst, best = (bar.low, bar.high) if is_long else (bar.high, bar.low)
         if (worst <= stop) if is_long else (worst >= stop):
-            return stopped_out()
-        if (best >= take_profit) if is_long else (best <= take_profit):
+            return stopped_out(held)
+        if take_profit is not None and ((best >= take_profit) if is_long else (best <= take_profit)):
             reward = abs(take_profit - entry_price)
-            return "win", reward / risk
+            return SimResult("win", reward / risk, held)
         if manager is not None:
             new_stop = manager.stop_after(position, best)
             if new_stop != stop:
                 stop = new_stop
                 position = replace(position, stop_loss=stop)
                 if (bar.close <= stop) if is_long else (bar.close >= stop):
-                    return stopped_out()
+                    return stopped_out(held)
     # never resolved: mark to market at the last close we saw
     signed = (last_close - entry_price) if is_long else (entry_price - last_close)
-    return "timeout", signed / risk
+    return SimResult("timeout", signed / risk, held)
+
+
+def closed_context(bars: list, times: list, as_of: datetime, entry_tf: Timeframe,
+                   tf: Timeframe, window: int) -> list:
+    """The last `window` bars of a slower timeframe that had CLOSED when the
+    entry bar that opened at `as_of` closed - which is when the strategy runs.
+
+    A bar is stamped with its OPEN time. The slice used to take every slower
+    bar that had opened by `as_of`, which includes the one still forming: an H4
+    bar opened at 08:00 was handed to an evaluation made at 10:00, carrying its
+    high, low and close up to 12:00. So every two-timeframe strategy was tested
+    with a filter that could see up to one slower bar into the future (3 hours
+    for H1+H4, 20 for H4+D1) - which the engine, reading only closed bars,
+    never can. Found 2026-11-13. A slower bar opened at t is closed at the
+    evaluation only if t + its length <= as_of + the entry bar's length."""
+    cutoff = as_of + timedelta(hours=TF_HOURS[entry_tf]) - timedelta(hours=TF_HOURS[tf])
+    end = bisect_right(times, cutoff)
+    return bars[max(0, end - window) : end]
 
 
 def run_backtest_for_symbol(
@@ -313,6 +444,10 @@ def run_backtest_for_symbol(
     entry_all = md.get_history(symbol, entry_tf, ENTRY_HISTORY_BARS)[:-1]  # drop forming bar
     if len(entry_all) <= entry_window + 2:
         return []
+    # Said out loud, because the terminal serves whatever history it has
+    # downloaded so far: a symbol it has only a year of looks exactly like a
+    # symbol that rarely trades.
+    print(f"  ({symbol}: {len(entry_all)} {entry_tf.value} bars, from {entry_all[0].time:%Y-%m-%d})")
 
     # Ask each context timeframe for the SAME span of history the entry bars
     # cover, so a slower regime filter isn't starved on long runs.
@@ -326,11 +461,19 @@ def run_backtest_for_symbol(
         context_times[tf] = [c.time for c in bars]
 
     costs = resolve_costs(symbol)
+    max_hold = getattr(strategy, "backtest_max_hold_bars", MAX_HOLD_BARS)
 
     outcomes: list[TradeOutcome] = []
     last_signal_index = -(10**9)
     floor = min_tradeable_stop(costs)
     untradeable = 0
+    # ONE POSITION PER SYMBOL, as the engine trades it. Every strategy declines
+    # a symbol it already holds, but the backtest used to show it an empty book
+    # on every bar - so a signal that repeats while the first trade is still
+    # open was counted again, a trade the engine would never have placed. The
+    # open trade is now handed to the strategy until the bar it ends on.
+    open_position: Position | None = None
+    open_until = -1
 
     # stop at len-2: a signal on bar i needs bar i+1 to exist to fill the entry
     for i in range(entry_window, len(entry_all) - 2):
@@ -340,10 +483,9 @@ def run_backtest_for_symbol(
         candles: dict = {entry_tf: window}
         starved = False
         for tf in context_tfs:
-            # Only bars that had already CLOSED at as_of - taking any later bar
-            # would leak the future into the decision.
-            end = bisect_right(context_times[tf], as_of)
-            sliced = context_bars[tf][max(0, end - WINDOW[tf]) : end]
+            # Only bars that had already CLOSED when this one did - see
+            # closed_context for the look-ahead this replaced.
+            sliced = closed_context(context_bars[tf], context_times[tf], as_of, entry_tf, tf, WINDOW[tf])
             if len(sliced) < WINDOW[tf]:
                 starved = True
                 break
@@ -355,7 +497,7 @@ def run_backtest_for_symbol(
             symbol=symbol,
             candles_by_timeframe=candles,
             account_state=PLACEHOLDER_ACCOUNT,
-            open_positions=[],
+            open_positions=[open_position] if open_position is not None and i < open_until else [],
             upcoming_news=(),
         )
         evaluation = strategy.evaluate(context)
@@ -379,14 +521,25 @@ def run_backtest_for_symbol(
             continue
 
         future = entry_all[i + 2 :]
-        result, gross_r = simulate_outcome(
-            signal.direction, entry_fill, signal.stop_loss, signal.take_profit, future, manager
+        managed = simulate_trade(
+            signal.direction, entry_fill, signal.stop_loss, signal.take_profit, future, manager, max_hold
         )
-        fixed_result, fixed_gross_r = simulate_outcome(
-            signal.direction, entry_fill, signal.stop_loss, signal.take_profit, future
+        fixed = simulate_trade(
+            signal.direction, entry_fill, signal.stop_loss, signal.take_profit, future, None, max_hold
         )
+        entry_bar = entry_all[i + 1]
+        open_position = Position("bt-open", symbol, signal.direction, 0.0, entry_fill, signal.stop_loss,
+                                 signal.take_profit, PositionStatus.OPEN, entry_bar.time)
+        open_until = i + 1 + managed.bars_held  # the bar the managed trade ends on
+
+        def financing(sim: SimResult) -> float:
+            exit_bar = future[sim.bars_held - 1] if sim.bars_held else entry_bar
+            return swap_in_r(costs, signal.direction, entry_fill, risk_price,
+                             nights_held(entry_bar.time, exit_bar.time))
+
         cost_r = cost_in_r(costs, risk_price)
         commission_r = commission_in_r(costs, risk_price)
+        swap_r = financing(managed)
         outcomes.append(
             TradeOutcome(
                 symbol=symbol,
@@ -395,14 +548,16 @@ def run_backtest_for_symbol(
                 entry_price=entry_fill,
                 stop_loss=signal.stop_loss,
                 take_profit=signal.take_profit,
-                result=result,
-                gross_r=gross_r,
-                net_r=gross_r - cost_r,
+                result=managed.result,
+                gross_r=managed.gross_r,
+                net_r=managed.gross_r - cost_r + swap_r,
                 cost_r=cost_r,
                 risk_price=risk_price,
-                fixed_result=fixed_result,
-                fixed_gross_r=fixed_gross_r,
+                fixed_result=fixed.result,
+                fixed_gross_r=fixed.gross_r,
                 commission_r=commission_r,
+                swap_r=swap_r,
+                fixed_swap_r=financing(fixed),
             )
         )
     if untradeable:
@@ -458,7 +613,13 @@ def summarize(label: str, outcomes: list[TradeOutcome]) -> None:
     moved_text = f" / {len(moved)} at moved stop" if moved else ""
     print(f"  trades           {n}  ({len(wins)}W / {len(losses)}L{moved_text} / {len(timeouts)} timeout)")
     print(f"  win rate         {win_rate:.1f}%  (target hits, of resolved)")
+    # A strategy with no target never "wins" by the line above; this is the
+    # share of trades that made money, however they ended.
+    print(f"  net positive     {100 * sum(1 for r in net_rs if r > 0) / n:.1f}% of trades")
     print(f"  total R          gross {gross_total:+.2f}   net {net_total:+.2f}   (costs cut {gross_total - net_total:.2f}R)")
+    swap_total = sum(o.swap_r for o in outcomes)
+    if swap_total:
+        print(f"  financing        {swap_total:+.2f}R in total, {swap_total / n:+.3f}R a trade  (overnight swap, inside net)")
     print(f"  expectancy       {expectancy:+.3f} R/trade")
     print(f"  avg win / loss   {avg_win:+.2f}R / {avg_loss:+.2f}R")
     print(f"  profit factor    {profit_factor:.2f}")
@@ -663,7 +824,8 @@ def main() -> None:
     per_year = len(all_outcomes) / years
     print("=" * 60)
     print(f"History span of signals: {span}")
-    print(f"Commission assumed: ${COMMISSION_PER_LOT_ROUNDTURN:.2f} round-turn per 1.0 lot")
+    print(f"Commission assumed: ${COMMISSION_PER_LOT_ROUNDTURN:.2f} round-turn per 1.0 lot on FX and metals, "
+          f"none on indices, energies and crypto (as this account's deals show)")
     # Trade rate is a first-class result: a strategy that can't produce enough
     # trades to be judged can never earn a READY verdict, however good it looks.
     print(f"Trade rate: {per_year:.0f}/year  ->  ~{100 / per_year:.1f} years to reach 100 live trades\n")
@@ -693,12 +855,39 @@ def main() -> None:
     print("  - Costs use a live spread SNAPSHOT; real spreads widen at news/rollover.")
     print("  - Commission is an assumption (COMMISSION_PER_LOT_ROUNDTURN) - set it to your schedule.")
     print("  - Intrabar order is unknown; same-bar stop+target counts as a loss (conservative).")
-    print("  - Stops are managed once per H1 bar, after its worst price; the engine checks every 5s.")
+    print("  - Stops are managed once per entry-timeframe bar, after its worst price; the engine checks every 5s.")
+    print("  - Overnight financing uses TODAY's swap rates for every year; rates and their sign have changed.")
+    print("  - Index prices fall on ex-dividend days and the CFD credits a long for it; that credit is not modelled.")
     print("  - One broker, one account, one historical path. Demo spreads differ from live.")
     print("  - Parameters were NOT optimised here, but this is still in-sample, not walk-forward.")
     print("  - A positive, tight, above-zero CI means 'worth forward-testing', not 'guaranteed'.")
     print()
-    preregistered_checks(all_outcomes)
+    if key.startswith("london_breakout"):
+        preregistered_checks(all_outcomes)  # hour and commission: that strategy's own test
+    groups = getattr(strategy, "report_groups", None)
+    if groups:
+        grouped_report(all_outcomes, groups)
+
+
+def grouped_report(outcomes: list[TradeOutcome], groups: dict[str, tuple[str, ...]]) -> None:
+    """The breakdowns a strategy's pre-registration names (`report_groups`:
+    label -> symbols), plus long against short. Net R, managed stops. Only the
+    whole is judged; the parts are printed so the result can be read, not so a
+    part can be kept."""
+    print("=" * 60)
+    print("PRE-REGISTERED VERDICT - net R, managed stops, after spread, commission and financing")
+    print("PASS only if the CI is entirely above zero AND both chronological halves are positive.\n")
+    _subset_line("every trade", outcomes, judged=True)
+    print("\n  Read, not judged:")
+    for label, symbols in groups.items():
+        _subset_line(label, [o for o in outcomes if o.symbol in symbols])
+    _subset_line("long", [o for o in outcomes if o.direction == Direction.LONG])
+    _subset_line("short", [o for o in outcomes if o.direction == Direction.SHORT])
+    gross = [o.gross_r for o in outcomes]
+    print(f"\n  before any cost: {statistics.mean(gross):+.3f}R a trade;  spread+commission "
+          f"{-statistics.mean(o.cost_r for o in outcomes):+.3f}R;  financing "
+          f"{statistics.mean(o.swap_r for o in outcomes):+.3f}R")
+    print()
 
 
 if __name__ == "__main__":

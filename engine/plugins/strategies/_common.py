@@ -99,6 +99,24 @@ LONDON_CROSS_CURRENCIES: dict[str, tuple[str, ...]] = {
 }
 LONDON_CROSSES: tuple[str, ...] = tuple(LONDON_CROSS_CURRENCIES)
 
+# --- slow trend-following (trend_daily_v1) ------------------------------------
+#
+# Chosen by rule before any result (docs/research-log.md, 2026-11-13): the lab's
+# standing 16, plus every continuous (non-expiring) market the broker lists that
+# is not an echo of one already in. Brent is WTI's echo; the other coins are
+# bitcoin's at this horizon; one stock index per region. Dated futures (bonds,
+# softs) have no continuous history and are out.
+TREND_DAILY_GROUPS: dict[str, tuple[str, ...]] = {
+    "FX (15 pairs)": tuple(s for s in UNIVERSE if s != "XAUUSD"),
+    "metals": ("XAUUSD", "XAGUSD", "XPTUSD", "XPDUSD"),
+    "energies": ("XTIUSD", "XNGUSD"),
+    "crypto": ("BTCUSD",),
+    "stock indices": ("US500", "DE40", "UK100", "JP225", "AUS200", "HK50"),
+}
+TREND_DAILY_UNIVERSE: tuple[str, ...] = UNIVERSE + tuple(
+    s for group in TREND_DAILY_GROUPS.values() for s in group if s not in UNIVERSE
+)
+
 # One lookup for the blackout, so a symbol added to any universe is covered.
 ALL_CURRENCIES: dict[str, tuple[str, ...]] = {
     **INSTRUMENT_CURRENCIES, **TRENDING_CURRENCIES, **LONDON_CROSS_CURRENCIES,

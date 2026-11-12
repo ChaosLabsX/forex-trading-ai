@@ -23,6 +23,7 @@ PLUGIN_REGISTRY: dict[str, dict[str, str]] = {
         "range_fade_h4_v1": "engine.plugins.strategies.range_fade_h4_v1:RangeFadeH4Strategy",
         "donchian_breakout_v1": "engine.plugins.strategies.donchian_breakout_v1:DonchianBreakoutStrategy",
         "donchian_trending_v1": "engine.plugins.strategies.donchian_trending_v1:DonchianTrendingStrategy",
+        "trend_daily_v1": "engine.plugins.strategies.trend_daily_v1:TrendDailyStrategy",
     },
     "risk_engine": {
         "default": "engine.plugins.risk.default_risk_engine:DefaultRiskEngine",

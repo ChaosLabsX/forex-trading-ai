@@ -14,6 +14,100 @@ history per instrument. Not one produced an edge that survives retail costs.
 The one funded on live, `london_breakout_v1`, has now been backtested exactly as
 it trades, and its CI sits entirely below zero (2026-11-04, next).
 
+## 2026-11-13 - Pre-registered: `trend_daily_v1`, slow trend-following, tested once
+
+Written before the backtest that tests it has been run on any symbol.
+
+**Why this one.** It is the "slow momentum" this log has listed as untested
+since the start, requested by the owner. It is a new claim, not a variant: every
+strategy so far carried ~0.08R of cost because its stop was 10-20 pips, and its
+signal was worth about zero before that cost. Here the stop is two DAILY ATRs -
+100+ pips - so the same spread and commission come to about 0.01R. Cost cannot
+be what decides this test. What is left is the question: does a price that
+closes out of a multi-month range keep going?
+
+**The rules, fixed now.** All from the published Turtle "System 2" (1983), none
+fitted here.
+
+| | |
+|---|---|
+| Signal | a closed daily bar closes above the high (long) or below the low (short) of the 55 daily bars before it |
+| Stop | 2 x ATR(20, daily) from that close |
+| Target | none |
+| Exit | the engine's own stop management, unchanged: to entry at +1R, then trailing 1R behind price past +2R |
+| When | once per closed day, at the close of the first H4 bar of the new day (04:00 broker time) - not at the daily close, which is the rollover minute the risk engine refuses |
+| Positions | one per symbol; a new breakout while one is open is ignored |
+
+**The 28 markets, chosen by rule before any result:** the lab's standing 16
+(15 FX pairs and gold), plus every continuous, non-expiring market the broker
+lists that is not an echo of one already in: silver, platinum, palladium; WTI
+crude and natural gas (Brent is WTI's echo); bitcoin (other coins are its echo
+at this horizon); and one stock index per region - US500, DE40, UK100, JP225,
+AUS200, HK50. Dated futures (bonds, softs) are out: no continuous history.
+
+**The test.** `scripts/backtest.py trend_daily_v1`, run once: 20,000 H4 bars a
+symbol (~12.8 years where the broker has them), stops managed as the engine
+manages them, net of spread, commission AND overnight financing.
+
+**Pass criteria.** Over every trade together: net expectancy with a 95% CI
+entirely above zero AND positive in both chronological halves. Anything less is
+a fail, recorded and not adjusted - no other channel length, stop multiple,
+exit or market list. Asset-class and long/short breakdowns are printed to be
+read; a pass in a part ("indices only", "longs only") is NOT a pass.
+
+**Prediction.** 1,500-2,500 trades. Spread and commission under 0.02R a trade
+at the median; financing a further -0.02R to -0.08R a trade, heaviest on long
+indices, gold and bitcoin. About half the trades full losses, a fifth scratched
+at entry, the return in a minority of long runs. FX about zero. Indices, gold
+and bitcoin positive long and negative short - 2014-2026 was a rising market in
+all three, which is drift, not timing, and the long/short split is there to
+show it. Whole test: between -0.05R and +0.15R net, more likely a fail than a
+pass. If it passes on longs in rising markets alone, that is recorded as what
+it is.
+
+**What a pass would and would not mean.** A candidate for the demo lab, never
+for live directly. Even then three things stand in the way, known now: the
+lab's cap of 4 concurrent trades would cut a 28-market trend-follower short;
+the AI reviewer's prompt assumes a target; and a two-daily-ATR stop costs
+$10-$120 at the broker's minimum lot, so at 0.75% risk the live account (~$223)
+could not size a single one of these trades.
+
+**Three faults in the backtest itself, found while preparing this, fixed before
+the run.** None is specific to this strategy; all change what re-runs of older
+strategies would print.
+
+1. **A look-ahead in every two-timeframe backtest.** Bars are stamped with their
+   open time, and the slower timeframe was sliced as "every bar opened by now" -
+   which includes the one still forming. An H4 bar opened at 08:00 was handed to
+   an evaluation made at 10:00 carrying its high, low and close up to 12:00.
+   The engine reads closed bars only and never sees this. It reached
+   `ema_trend_v1`, `range_fade_v1` (H1 + an H4 regime filter, up to 3 hours
+   ahead) and `range_fade_h4_v1` (H4 + D1, up to 20 hours). Their verdicts
+   stand a fortiori - all lost even with the peek - but **`range_fade_v1`'s
+   "real gross edge" (+0.044R, the finding this log calls the one that matters)
+   was measured through a filter that could see the next few hours**, and a
+   fade's worst trades are exactly the ones a peek at the coming range would
+   remove. The demo, which cannot peek, returned -0.080R gross over 272. Treat
+   that edge as unproven until re-measured (below).
+2. **No position was ever open.** Every strategy declines a symbol it already
+   holds; the backtest showed it an empty book on every bar, so a signal that
+   repeated during an open trade was counted again. Now one position per
+   symbol, as traded.
+3. **Commission was charged on markets that have none.** 2,060 of the demo
+   account's own deals: $3.50 a lot a side on FX and metals; **zero on indices,
+   energies and crypto** (XNGUSD, BTCUSD, IT40, MidDE50: $0.00 over 178 deals).
+   The model charged $7 a lot on everything - on a small-contract index that is
+   most of the risk. It explains the 4-43x gap between modelled and realised
+   cost recorded on 2026-08-30 for IT40, MidDE50, BTCUSD and XNGUSD, and it
+   means `donchian_trending_v1`'s backtest figures for those symbols carried a
+   toll that does not exist. Its retirement rests on the demo result (-0.324R,
+   CI below zero), which was charged real costs, and is unchanged.
+
+Also new: overnight financing is charged per night held, from the broker's
+swap quote (today's rates applied to every year - crude, and stated in the
+output). A known simplification left as it is: a trade's first bar after entry
+is not walked, so a stop touched inside it is seen one bar late.
+
 ## 2026-11-13 - Full audit: live is now net negative, and the cap did not bind on one bar
 
 A whole-system audit against the accounts' own records. No strategy, threshold
