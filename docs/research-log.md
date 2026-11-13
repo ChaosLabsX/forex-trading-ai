@@ -1027,6 +1027,47 @@ the check, so neither was built.
 to have been traded away. Before building one, look for the authors' own
 follow-up and for a sign-versus-magnitude decomposition.
 
+## Candidates rejected before any code (2026-11-14): information that is not price
+
+The owner asked for one idea built on a different KIND of information than
+price patterns, tested like `trend_daily_v1`. Four were weighed; none was built.
+
+- **The pick: the turn-of-the-month effect in stock indices** - hold the last
+  trading day of a month and the first three of the next. Chosen because the
+  information is the calendar, the mechanism is real (month-end pension and
+  salary flows), it needs no outside data, and index CFDs carry no commission.
+  Rejected on the literature check this log requires, and on arithmetic:
+  - Han, Han & Tian, "The disappearing turn-of-month effect" (*Finance Research
+    Letters* 71, 2025): once highly significant, it disappears entirely after
+    2001, which they put down to cheaper trading letting it be arbitraged. A
+    2025 practitioner re-test on ~30 ETFs agrees for the classic window: no
+    significant effect in US equities in recent data.
+  - The test could not have seen it anyway. Real intraday index history here
+    starts in 2016: ~131 month-ends, and the six indices move together, so that
+    is ~131 observations, not 786. Against a same-length mid-month control, a
+    difference under roughly 0.4% a month would not clear a 95% interval (my
+    estimate, from ~1.8% for a four-day index move) - and this broker's
+    financing takes ~0.13% of each five-night hold first.
+- **Interest-rate differences (carry).** The broker keeps most of it: on today's
+  swap table only the yen and franc pairs pay the holder more than ~1.5% a year
+  (USDJPY, GBPJPY, AUDJPY, USDCHF), and GBPUSD and GBPAUD charge both sides. A
+  test of "hold what pays" is therefore one or two bets - short the yen, short
+  the franc - repeated monthly, and a bootstrap would read one macro regime as
+  hundreds of independent trades. It also needs rate history from outside, and
+  an engine that can hold and rebalance, which this one cannot.
+- **Trader positioning (the weekly CFTC reports).** Two opposite readings are
+  both defended - extremes reverse, extremes continue - so choosing one after
+  seeing the data is the search this log forbids, and the thresholds are free
+  knobs. Needs outside data and a new provider.
+- **News surprises (result against forecast).** No usable history of forecasts
+  is available to test on, and the trade is at the moment spreads are widest -
+  the fast, expensive kind this log has already measured to lose.
+
+**What this adds to the lesson above:** the binding limits here are not ideas
+but (1) how few independent observations ten years of one broker's history
+holds for anything slower than hourly, and (2) what the broker charges to hold
+a position overnight. An idea has to clear both before it is worth code.
+
 ## What has NOT been tested
 
 - **Slow momentum - now tested once (2026-11-13, `trend_daily_v1`): fail.**
