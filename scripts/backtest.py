@@ -91,6 +91,9 @@ MAX_HOLD_BARS = 200
 # MT5's SYMBOL_SWAP_MODE_* values: how a symbol's overnight financing is quoted.
 SWAP_DISABLED, SWAP_POINTS, SWAP_BASE_CURRENCY, SWAP_MARGIN_CURRENCY, SWAP_DEPOSIT_CURRENCY = 0, 1, 2, 3, 4
 SWAP_PCT_OF_CURRENT_PRICE, SWAP_PCT_OF_OPEN_PRICE = 5, 6
+# A year counts as real intraday history at this share of the densest year's
+# bars per day - see first_intraday_index.
+DENSE_YEAR_SHARE = 2 / 3
 
 # IC Markets "Raw Spread" charges commission separately from the (near-zero)
 # spread: ~$3.50 per lot per side, i.e. ~$7 round-turn per 1.0 lot. Override
@@ -407,6 +410,40 @@ def simulate_trade(
     return SimResult("timeout", signed / risk, held)
 
 
+def first_intraday_index(bars: list) -> int:
+    """Where a symbol's REAL history on this timeframe begins.
+
+    For its older years the broker serves one bar a day on every intraday
+    timeframe - an "H4" bar that is really the whole day. Gold, silver, bitcoin
+    and the stock indices are like that before 2016-2018. A strategy clocked on
+    H4 bars cannot be tested "as it trades" on a day that has only one of them,
+    so those years are left out rather than simulated as something else.
+
+    Mechanical, and blind to prices: walking back from the newest year, the
+    test starts at the last year whose bars per calendar day are at least
+    two-thirds of the symbol's densest full year. A first year that is merely
+    partial (the bar-count cap landing mid-year) is as dense as any other and
+    stays in."""
+    by_year: dict[int, list[int]] = {}
+    for i, bar in enumerate(bars):
+        by_year.setdefault(bar.time.year, []).append(i)
+    if len(by_year) < 2:
+        return 0
+
+    def span_days(idx: list[int]) -> float:
+        return (bars[idx[-1]].time - bars[idx[0]].time).total_seconds() / 86400
+
+    density = {y: len(idx) / max(span_days(idx), 1.0) for y, idx in by_year.items()}
+    full_years = [y for y, idx in by_year.items() if span_days(idx) >= 180] or list(by_year)
+    reference = max(density[y] for y in full_years)
+    start_year = max(by_year)
+    for year in sorted(by_year, reverse=True):
+        if density[year] < DENSE_YEAR_SHARE * reference:
+            break
+        start_year = year
+    return by_year[start_year][0]
+
+
 def closed_context(bars: list, times: list, as_of: datetime, entry_tf: Timeframe,
                    tf: Timeframe, window: int) -> list:
     """The last `window` bars of a slower timeframe that had CLOSED when the
@@ -447,7 +484,9 @@ def run_backtest_for_symbol(
     # Said out loud, because the terminal serves whatever history it has
     # downloaded so far: a symbol it has only a year of looks exactly like a
     # symbol that rarely trades.
-    print(f"  ({symbol}: {len(entry_all)} {entry_tf.value} bars, from {entry_all[0].time:%Y-%m-%d})")
+    first_real = first_intraday_index(entry_all)
+    sparse = f"; tested from {entry_all[first_real].time:%Y-%m-%d}, daily-only before" if first_real else ""
+    print(f"  ({symbol}: {len(entry_all)} {entry_tf.value} bars, from {entry_all[0].time:%Y-%m-%d}{sparse})")
 
     # Ask each context timeframe for the SAME span of history the entry bars
     # cover, so a slower regime filter isn't starved on long runs.
@@ -476,7 +515,7 @@ def run_backtest_for_symbol(
     open_until = -1
 
     # stop at len-2: a signal on bar i needs bar i+1 to exist to fill the entry
-    for i in range(entry_window, len(entry_all) - 2):
+    for i in range(max(entry_window, first_real), len(entry_all) - 2):
         window = entry_all[i - entry_window : i + 1]
         as_of = window[-1].time
 

@@ -1,0 +1,562 @@
+Broker clock: UTC+2h now, New-York-close convention confirmed - every historical bar gets the offset in force when it formed.
+
+WARNING: EURUSD bid == ask - the market looks closed, so the spread
+         snapshot reads ~zero and SPREAD cost is UNDERSTATED here.
+         Commission still applies. Re-run during market hours for the
+         full picture; a strategy that loses on commission alone is
+         already answered.
+
+Backtesting 'trend_daily_v1' over 28 instrument(s)
+  entry H4  ·  timeframes H4(250)  D1(90)
+
+Per-instrument (net of costs):
+
+  (EURUSD: 19999 H4 bars, from 2014-01-05)
+EURUSD:
+  trades           74  (0W / 42L / 31 at moved stop / 1 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     35.1% of trades
+  total R          gross -5.42   net -8.27   (costs cut 2.84R)
+  financing        -2.50R in total, -0.034R a trade  (overnight swap, inside net)
+  expectancy       -0.112 R/trade
+  avg win / loss   +0.00R / -1.03R
+  profit factor    0.81
+  cost per trade   median 0.005R  p95 0.007R  max 0.008R
+  max drawdown     21.44R
+  longest losing   9 in a row
+  expectancy 95%CI [-0.421, +0.243] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy -0.073 R/trade  95%CI [-0.387, +0.285]  -> signal not distinguishable from zero
+
+  (GBPUSD: 19999 H4 bars, from 2014-01-05)
+GBPUSD:
+  trades           74  (0W / 41L / 33 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     24.3% of trades
+  total R          gross -5.77   net -9.60   (costs cut 3.83R)
+  financing        -3.47R in total, -0.047R a trade  (overnight swap, inside net)
+  expectancy       -0.130 R/trade
+  avg win / loss   +0.00R / -1.03R
+  profit factor    0.78
+  cost per trade   median 0.004R  p95 0.007R  max 0.040R
+  max drawdown     11.24R
+  longest losing   10 in a row
+  expectancy 95%CI [-0.402, +0.170] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy -0.078 R/trade  95%CI [-0.356, +0.227]  -> signal not distinguishable from zero
+
+  (USDJPY: 19999 H4 bars, from 2014-01-05)
+USDJPY:
+  trades           74  (0W / 42L / 32 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     36.5% of trades
+  total R          gross +3.19   net +3.16   (costs cut 0.03R)
+  financing        +0.53R in total, +0.007R a trade  (overnight swap, inside net)
+  expectancy       +0.043 R/trade
+  avg win / loss   +0.00R / -1.01R
+  profit factor    1.07
+  cost per trade   median 0.007R  p95 0.014R  max 0.016R
+  max drawdown     13.09R
+  longest losing   7 in a row
+  expectancy 95%CI [-0.298, +0.415] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.043 R/trade  95%CI [-0.289, +0.404]  -> signal not distinguishable from zero
+
+  (XAUUSD: 19999 H4 bars, from 2004-01-18; tested from 2016-01-03, daily-only before)
+XAUUSD:
+  trades           59  (0W / 21L / 38 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     47.5% of trades
+  total R          gross +31.21   net +24.66   (costs cut 6.55R)
+  financing        -6.38R in total, -0.108R a trade  (overnight swap, inside net)
+  expectancy       +0.418 R/trade
+  avg win / loss   +0.00R / -0.98R
+  profit factor    2.05
+  cost per trade   median 0.003R  p95 0.005R  max 0.006R
+  max drawdown     7.74R
+  longest losing   5 in a row
+  expectancy 95%CI [+0.034, +0.840] R/trade  -> edge POSITIVE
+  GROSS expectancy +0.529 R/trade  95%CI [+0.128, +0.975]  -> signal POSITIVE
+
+  (AUDUSD: 19999 H4 bars, from 2014-01-05)
+AUDUSD:
+  trades           75  (0W / 40L / 34 at moved stop / 1 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     34.7% of trades
+  total R          gross -6.82   net -8.13   (costs cut 1.31R)
+  financing        -0.89R in total, -0.012R a trade  (overnight swap, inside net)
+  expectancy       -0.108 R/trade
+  avg win / loss   +0.00R / -1.01R
+  profit factor    0.80
+  cost per trade   median 0.005R  p95 0.008R  max 0.010R
+  max drawdown     15.52R
+  longest losing   10 in a row
+  expectancy 95%CI [-0.365, +0.153] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy -0.091 R/trade  95%CI [-0.348, +0.170]  -> signal not distinguishable from zero
+
+  (USDCAD: 2908 H4 bars, from 2025-01-01)
+USDCAD:
+  trades           9  (0W / 5L / 4 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     22.2% of trades
+  total R          gross -5.00   net -5.71   (costs cut 0.71R)
+  financing        -0.63R in total, -0.070R a trade  (overnight swap, inside net)
+  expectancy       -0.635 R/trade
+  avg win / loss   +0.00R / -1.11R
+  profit factor    0.02
+  cost per trade   median 0.009R  p95 0.012R  max 0.012R
+  max drawdown     5.71R
+  longest losing   3 in a row
+  expectancy 95%CI [-0.990, -0.262] R/trade  -> edge negative
+  GROSS expectancy -0.556 R/trade  95%CI [-0.889, -0.222]  -> signal negative
+
+  (USDCHF: 19999 H4 bars, from 2014-01-06)
+USDCHF:
+  trades           67  (0W / 33L / 34 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     41.8% of trades
+  total R          gross -1.30   net -5.64   (costs cut 4.34R)
+  financing        -4.04R in total, -0.060R a trade  (overnight swap, inside net)
+  expectancy       -0.084 R/trade
+  avg win / loss   +0.00R / -1.04R
+  profit factor    0.84
+  cost per trade   median 0.005R  p95 0.007R  max 0.007R
+  max drawdown     9.71R
+  longest losing   6 in a row
+  expectancy 95%CI [-0.370, +0.219] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy -0.019 R/trade  95%CI [-0.306, +0.281]  -> signal not distinguishable from zero
+
+  (NZDUSD: 19999 H4 bars, from 2014-01-05)
+NZDUSD:
+  trades           71  (0W / 36L / 35 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     28.2% of trades
+  total R          gross -7.68   net -10.31   (costs cut 2.63R)
+  financing        -2.18R in total, -0.031R a trade  (overnight swap, inside net)
+  expectancy       -0.145 R/trade
+  avg win / loss   +0.00R / -1.03R
+  profit factor    0.72
+  cost per trade   median 0.006R  p95 0.009R  max 0.010R
+  max drawdown     16.69R
+  longest losing   13 in a row
+  expectancy 95%CI [-0.402, +0.132] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy -0.108 R/trade  95%CI [-0.368, +0.172]  -> signal not distinguishable from zero
+
+  (EURJPY: 19999 H4 bars, from 2014-01-05)
+EURJPY:
+  trades           69  (0W / 38L / 31 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     33.3% of trades
+  total R          gross -14.67   net -15.84   (costs cut 1.17R)
+  financing        -0.72R in total, -0.010R a trade  (overnight swap, inside net)
+  expectancy       -0.230 R/trade
+  avg win / loss   +0.00R / -1.03R
+  profit factor    0.60
+  cost per trade   median 0.006R  p95 0.010R  max 0.013R
+  max drawdown     16.24R
+  longest losing   9 in a row
+  expectancy 95%CI [-0.478, +0.050] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy -0.213 R/trade  95%CI [-0.458, +0.060]  -> signal not distinguishable from zero
+
+  (GBPJPY: 19999 H4 bars, from 2014-01-05)
+GBPJPY:
+  trades           61  (0W / 30L / 31 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     41.0% of trades
+  total R          gross +4.67   net +4.86   (costs cut -0.20R)
+  financing        +0.53R in total, +0.009R a trade  (overnight swap, inside net)
+  expectancy       +0.080 R/trade
+  avg win / loss   +0.00R / -1.00R
+  profit factor    1.16
+  cost per trade   median 0.005R  p95 0.007R  max 0.010R
+  max drawdown     6.85R
+  longest losing   5 in a row
+  expectancy 95%CI [-0.252, +0.426] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.077 R/trade  95%CI [-0.249, +0.418]  -> signal not distinguishable from zero
+
+  (EURGBP: 19999 H4 bars, from 2014-01-05)
+EURGBP:
+  trades           69  (0W / 45L / 24 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     24.6% of trades
+  total R          gross -17.17   net -20.76   (costs cut 3.59R)
+  financing        -3.01R in total, -0.044R a trade  (overnight swap, inside net)
+  expectancy       -0.301 R/trade
+  avg win / loss   +0.00R / -1.04R
+  profit factor    0.56
+  cost per trade   median 0.007R  p95 0.015R  max 0.017R
+  max drawdown     25.42R
+  longest losing   10 in a row
+  expectancy 95%CI [-0.576, +0.005] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy -0.249 R/trade  95%CI [-0.525, +0.058]  -> signal not distinguishable from zero
+
+  (AUDJPY: 2908 H4 bars, from 2025-01-01)
+AUDJPY:
+  trades           8  (0W / 5L / 3 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     37.5% of trades
+  total R          gross -0.82   net +0.11   (costs cut -0.93R)
+  financing        +0.97R in total, +0.122R a trade  (overnight swap, inside net)
+  expectancy       +0.014 R/trade
+  avg win / loss   +0.00R / -0.99R
+  profit factor    1.02
+  cost per trade   median 0.006R  p95 0.008R  max 0.008R
+  max drawdown     3.97R
+  longest losing   4 in a row
+  expectancy 95%CI [-0.864, +1.111] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy -0.102 R/trade  95%CI [-0.875, +0.914]  -> signal not distinguishable from zero
+
+  (EURAUD: 19999 H4 bars, from 2014-01-06)
+EURAUD:
+  trades           63  (0W / 31L / 32 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     46.0% of trades
+  total R          gross +8.00   net +5.78   (costs cut 2.22R)
+  financing        -1.87R in total, -0.030R a trade  (overnight swap, inside net)
+  expectancy       +0.092 R/trade
+  avg win / loss   +0.00R / -1.04R
+  profit factor    1.18
+  cost per trade   median 0.005R  p95 0.008R  max 0.010R
+  max drawdown     8.77R
+  longest losing   6 in a row
+  expectancy 95%CI [-0.247, +0.455] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.127 R/trade  95%CI [-0.209, +0.491]  -> signal not distinguishable from zero
+
+  (GBPAUD: 19999 H4 bars, from 2014-01-05)
+GBPAUD:
+  trades           69  (0W / 40L / 28 at moved stop / 1 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     18.8% of trades
+  total R          gross -12.60   net -16.51   (costs cut 3.91R)
+  financing        -3.54R in total, -0.051R a trade  (overnight swap, inside net)
+  expectancy       -0.239 R/trade
+  avg win / loss   +0.00R / -1.04R
+  profit factor    0.61
+  cost per trade   median 0.005R  p95 0.008R  max 0.009R
+  max drawdown     18.53R
+  longest losing   13 in a row
+  expectancy 95%CI [-0.513, +0.058] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy -0.183 R/trade  95%CI [-0.458, +0.118]  -> signal not distinguishable from zero
+
+  (CADJPY: 2908 H4 bars, from 2025-01-01)
+CADJPY:
+  trades           10  (0W / 7L / 3 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     30.0% of trades
+  total R          gross -5.66   net -5.51   (costs cut -0.15R)
+  financing        +0.23R in total, +0.023R a trade  (overnight swap, inside net)
+  expectancy       -0.551 R/trade
+  avg win / loss   +0.00R / -1.01R
+  profit factor    0.22
+  cost per trade   median 0.008R  p95 0.011R  max 0.011R
+  max drawdown     5.51R
+  longest losing   5 in a row
+  expectancy 95%CI [-0.999, +0.024] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy -0.566 R/trade  95%CI [-1.000, +0.001]  -> signal not distinguishable from zero
+
+  (CHFJPY: 19999 H4 bars, from 2014-01-05)
+CHFJPY:
+  trades           62  (0W / 31L / 31 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     38.7% of trades
+  total R          gross +0.29   net -4.58   (costs cut 4.87R)
+  financing        -4.43R in total, -0.071R a trade  (overnight swap, inside net)
+  expectancy       -0.074 R/trade
+  avg win / loss   +0.00R / -1.03R
+  profit factor    0.86
+  cost per trade   median 0.006R  p95 0.011R  max 0.013R
+  max drawdown     10.67R
+  longest losing   5 in a row
+  expectancy 95%CI [-0.359, +0.231] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.005 R/trade  95%CI [-0.294, +0.324]  -> signal not distinguishable from zero
+
+  (XAGUSD: 19946 H4 bars, from 2002-09-14; tested from 2016-01-03, daily-only before)
+XAGUSD:
+  trades           64  (0W / 34L / 29 at moved stop / 1 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     40.6% of trades
+  total R          gross +11.05   net +9.87   (costs cut 1.18R)
+  financing        -0.43R in total, -0.007R a trade  (overnight swap, inside net)
+  expectancy       +0.154 R/trade
+  avg win / loss   +0.00R / -1.01R
+  profit factor    1.28
+  cost per trade   median 0.010R  p95 0.027R  max 0.030R
+  max drawdown     10.80R
+  longest losing   7 in a row
+  expectancy 95%CI [-0.207, +0.527] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.173 R/trade  95%CI [-0.192, +0.551]  -> signal not distinguishable from zero
+
+  (XPTUSD: 16860 H4 bars, from 2015-03-29; tested from 2017-01-02, daily-only before)
+XPTUSD:
+  trades           57  (0W / 28L / 29 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     14.0% of trades
+  total R          gross -13.09   net -19.98   (costs cut 6.89R)
+  financing        -1.83R in total, -0.032R a trade  (overnight swap, inside net)
+  expectancy       -0.351 R/trade
+  avg win / loss   +0.00R / -1.11R
+  profit factor    0.41
+  cost per trade   median 0.079R  p95 0.159R  max 0.178R
+  max drawdown     22.92R
+  longest losing   25 in a row
+  expectancy 95%CI [-0.590, -0.075] R/trade  -> edge negative
+  GROSS expectancy -0.230 R/trade  95%CI [-0.469, +0.045]  -> signal not distinguishable from zero
+
+  (XPDUSD: 16798 H4 bars, from 2015-03-29; tested from 2017-01-02, daily-only before)
+  (XPDUSD: skipped 1 signals whose stop was below the tradeable floor 10.66000 - they could not have been orders)
+XPDUSD:
+  trades           55  (0W / 22L / 33 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     38.2% of trades
+  total R          gross +10.44   net +4.30   (costs cut 6.14R)
+  financing        -1.93R in total, -0.035R a trade  (overnight swap, inside net)
+  expectancy       +0.078 R/trade
+  avg win / loss   +0.00R / -1.11R
+  profit factor    1.17
+  cost per trade   median 0.072R  p95 0.163R  max 0.171R
+  max drawdown     8.83R
+  longest losing   10 in a row
+  expectancy 95%CI [-0.232, +0.409] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.190 R/trade  95%CI [-0.120, +0.520]  -> signal not distinguishable from zero
+
+  (XTIUSD: 16025 H4 bars, from 2016-06-29)
+XTIUSD:
+  trades           50  (0W / 15L / 35 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     50.0% of trades
+  total R          gross +13.13   net +12.38   (costs cut 0.75R)
+  financing        -0.50R in total, -0.010R a trade  (overnight swap, inside net)
+  expectancy       +0.248 R/trade
+  avg win / loss   +0.00R / -1.07R
+  profit factor    1.67
+  cost per trade   median 0.005R  p95 0.009R  max 0.009R
+  max drawdown     4.89R
+  longest losing   5 in a row
+  expectancy 95%CI [-0.122, +0.648] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.263 R/trade  95%CI [-0.077, +0.643]  -> signal not distinguishable from zero
+
+  (XNGUSD: 15764 H4 bars, from 2016-08-23)
+XNGUSD:
+  trades           50  (0W / 24L / 24 at moved stop / 2 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     42.0% of trades
+  total R          gross +6.01   net +6.05   (costs cut -0.04R)
+  financing        +1.01R in total, +0.020R a trade  (overnight swap, inside net)
+  expectancy       +0.121 R/trade
+  avg win / loss   +0.00R / -1.40R
+  profit factor    1.15
+  cost per trade   median 0.017R  p95 0.044R  max 0.053R
+  max drawdown     13.61R
+  longest losing   4 in a row
+  expectancy 95%CI [-0.540, +0.846] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.120 R/trade  95%CI [-0.261, +0.539]  -> signal not distinguishable from zero
+
+  (BTCUSD: 19999 H4 bars, from 2012-06-21; tested from 2018-01-01, daily-only before)
+BTCUSD:
+  trades           63  (0W / 23L / 39 at moved stop / 1 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     31.7% of trades
+  total R          gross +20.74   net +16.78   (costs cut 3.96R)
+  financing        -3.77R in total, -0.060R a trade  (overnight swap, inside net)
+  expectancy       +0.266 R/trade
+  avg win / loss   +0.00R / -1.04R
+  profit factor    1.65
+  cost per trade   median 0.001R  p95 0.012R  max 0.020R
+  max drawdown     4.46R
+  longest losing   7 in a row
+  expectancy 95%CI [-0.079, +0.638] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.329 R/trade  95%CI [-0.016, +0.700]  -> signal not distinguishable from zero
+
+  (US500: 17560 H4 bars, from 2012-08-05; tested from 2016-01-03, daily-only before)
+US500:
+  trades           63  (0W / 27L / 36 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     25.4% of trades
+  total R          gross +10.62   net -34.89   (costs cut 45.51R)
+  financing        -45.27R in total, -0.719R a trade  (overnight swap, inside net)
+  expectancy       -0.554 R/trade
+  avg win / loss   +0.00R / -1.25R
+  profit factor    0.33
+  cost per trade   median 0.003R  p95 0.009R  max 0.016R
+  max drawdown     34.89R
+  longest losing   12 in a row
+  expectancy 95%CI [-0.840, -0.258] R/trade  -> edge negative
+  GROSS expectancy +0.169 R/trade  95%CI [-0.152, +0.522]  -> signal not distinguishable from zero
+
+  (DE40: 17370 H4 bars, from 2012-08-05; tested from 2016-01-03, daily-only before)
+DE40:
+  trades           61  (0W / 31L / 29 at moved stop / 1 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     21.3% of trades
+  total R          gross -8.48   net -28.62   (costs cut 20.14R)
+  financing        -20.03R in total, -0.328R a trade  (overnight swap, inside net)
+  expectancy       -0.469 R/trade
+  avg win / loss   +0.00R / -1.19R
+  profit factor    0.34
+  cost per trade   median 0.002R  p95 0.003R  max 0.004R
+  max drawdown     28.62R
+  longest losing   9 in a row
+  expectancy 95%CI [-0.712, -0.216] R/trade  -> edge negative
+  GROSS expectancy -0.139 R/trade  95%CI [-0.407, +0.154]  -> signal not distinguishable from zero
+
+  (UK100: 17300 H4 bars, from 2012-08-05; tested from 2016-01-03, daily-only before)
+UK100:
+  trades           54  (0W / 28L / 26 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     16.7% of trades
+  total R          gross -13.96   net -30.34   (costs cut 16.38R)
+  financing        -16.10R in total, -0.298R a trade  (overnight swap, inside net)
+  expectancy       -0.562 R/trade
+  avg win / loss   +0.00R / -1.16R
+  profit factor    0.19
+  cost per trade   median 0.006R  p95 0.009R  max 0.009R
+  max drawdown     30.34R
+  longest losing   12 in a row
+  expectancy 95%CI [-0.765, -0.348] R/trade  -> edge negative
+  GROSS expectancy -0.259 R/trade  95%CI [-0.491, -0.007]  -> signal negative
+
+  (JP225: 17560 H4 bars, from 2012-08-05; tested from 2016-01-03, daily-only before)
+JP225:
+  trades           60  (0W / 29L / 31 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     30.0% of trades
+  total R          gross +11.09   net -4.76   (costs cut 15.85R)
+  financing        -15.56R in total, -0.259R a trade  (overnight swap, inside net)
+  expectancy       -0.079 R/trade
+  avg win / loss   +0.00R / -1.11R
+  profit factor    0.87
+  cost per trade   median 0.004R  p95 0.010R  max 0.013R
+  max drawdown     15.99R
+  longest losing   8 in a row
+  expectancy 95%CI [-0.417, +0.279] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.185 R/trade  95%CI [-0.200, +0.599]  -> signal not distinguishable from zero
+
+  (AUS200: 2853 H4 bars, from 2025-01-01)
+AUS200:
+  trades           6  (0W / 3L / 3 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     16.7% of trades
+  total R          gross -1.40   net -3.07   (costs cut 1.67R)
+  financing        -1.63R in total, -0.272R a trade  (overnight swap, inside net)
+  expectancy       -0.511 R/trade
+  avg win / loss   +0.00R / -1.10R
+  profit factor    0.13
+  cost per trade   median 0.005R  p95 0.014R  max 0.014R
+  max drawdown     3.52R
+  longest losing   5 in a row
+  expectancy 95%CI [-0.977, -0.003] R/trade  -> edge negative
+  GROSS expectancy -0.233 R/trade  95%CI [-0.833, +0.636]  -> signal not distinguishable from zero
+
+  (HK50: 14248 H4 bars, from 2012-08-05; tested from 2016-01-03, daily-only before)
+HK50:
+  trades           56  (0W / 33L / 23 at moved stop / 0 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     25.0% of trades
+  total R          gross +2.62   net -2.80   (costs cut 5.43R)
+  financing        -5.09R in total, -0.091R a trade  (overnight swap, inside net)
+  expectancy       -0.050 R/trade
+  avg win / loss   +0.00R / -1.05R
+  profit factor    0.92
+  cost per trade   median 0.005R  p95 0.009R  max 0.046R
+  max drawdown     8.80R
+  longest losing   8 in a row
+  expectancy 95%CI [-0.436, +0.397] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.047 R/trade  95%CI [-0.354, +0.510]  -> signal not distinguishable from zero
+
+============================================================
+History span of signals: 2014-03-06 22:00:00+00:00  ->  2026-11-11 22:00:00+00:00
+Commission assumed: $7.00 round-turn per 1.0 lot on FX and metals, none on indices, energies and crypto (as this account's deals show)
+Trade rate: 122/year  ->  ~0.8 years to reach 100 live trades
+
+Stop management (as the engine trades): stop to entry at +1R, trailing 1R behind past +2R
+
+ALL INSTRUMENTS:
+  trades           1553  (0W / 784L / 761 at moved stop / 8 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     32.5% of trades
+  total R          gross +13.19   net -147.40   (costs cut 160.58R)
+  financing        -142.51R in total, -0.092R a trade  (overnight swap, inside net)
+  expectancy       -0.095 R/trade
+  avg win / loss   +0.00R / -1.07R
+  profit factor    0.84
+  cost per trade   median 0.005R  p95 0.065R  max 0.178R
+  max drawdown     184.59R
+  longest losing   18 in a row
+  expectancy 95%CI [-0.161, -0.027] R/trade  -> edge negative
+  GROSS expectancy +0.008 R/trade  95%CI [-0.057, +0.075]  -> signal not distinguishable from zero
+
+ALL INSTRUMENTS, stops held FIXED (the pre-2026-10-12 model):
+  trades           1553  (0W / 1323L / 230 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     13.4% of trades
+  total R          gross +134.75   net -621.99   (costs cut 756.73R)
+  financing        -738.65R in total, -0.476R a trade  (overnight swap, inside net)
+  expectancy       -0.401 R/trade
+  avg win / loss   +0.00R / -1.22R
+  profit factor    0.65
+  cost per trade   median 0.005R  p95 0.065R  max 0.178R
+  max drawdown     788.58R
+  longest losing   60 in a row
+  expectancy 95%CI [-0.565, -0.225] R/trade  -> edge negative
+  GROSS expectancy +0.087 R/trade  95%CI [-0.081, +0.263]  -> signal not distinguishable from zero
+
+Managed vs fixed: 761 of 1553 trades end differently; expectancy -0.095R vs -0.401R (+0.306R per trade)
+
+Chronological stability (does the edge persist across time?):
+
+  first half:
+  trades           776  (0W / 370L / 405 at moved stop / 1 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     34.1% of trades
+  total R          gross +79.64   net -24.73   (costs cut 104.37R)
+  financing        -94.02R in total, -0.121R a trade  (overnight swap, inside net)
+  expectancy       -0.032 R/trade
+  avg win / loss   +0.00R / -1.08R
+  profit factor    0.94
+  cost per trade   median 0.006R  p95 0.073R  max 0.171R
+  max drawdown     96.49R
+  longest losing   14 in a row
+  expectancy 95%CI [-0.133, +0.072] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.103 R/trade  95%CI [+0.005, +0.201]  -> signal POSITIVE
+     ^ the idea predicts price, but costs exceed what it predicts
+
+  second half:
+  trades           777  (0W / 414L / 356 at moved stop / 7 timeout)
+  win rate         0.0%  (target hits, of resolved)
+  net positive     30.8% of trades
+  total R          gross -66.45   net -122.67   (costs cut 56.21R)
+  financing        -48.48R in total, -0.062R a trade  (overnight swap, inside net)
+  expectancy       -0.158 R/trade
+  avg win / loss   +0.00R / -1.05R
+  profit factor    0.73
+  cost per trade   median 0.005R  p95 0.049R  max 0.178R
+  max drawdown     126.61R
+  longest losing   18 in a row
+  expectancy 95%CI [-0.245, -0.070] R/trade  -> edge negative
+  GROSS expectancy -0.086 R/trade  95%CI [-0.173, +0.004]  -> signal not distinguishable from zero
+
+Caveats - read before trusting any number above:
+  - Costs use a live spread SNAPSHOT; real spreads widen at news/rollover.
+  - Commission is an assumption (COMMISSION_PER_LOT_ROUNDTURN) - set it to your schedule.
+  - Intrabar order is unknown; same-bar stop+target counts as a loss (conservative).
+  - Stops are managed once per entry-timeframe bar, after its worst price; the engine checks every 5s.
+  - Overnight financing uses TODAY's swap rates for every year; rates and their sign have changed.
+  - Index prices fall on ex-dividend days and the CFD credits a long for it; that credit is not modelled.
+  - One broker, one account, one historical path. Demo spreads differ from live.
+  - Parameters were NOT optimised here, but this is still in-sample, not walk-forward.
+  - A positive, tight, above-zero CI means 'worth forward-testing', not 'guaranteed'.
+
+============================================================
+PRE-REGISTERED VERDICT - net R, managed stops, after spread, commission and financing
+PASS only if the CI is entirely above zero AND both chronological halves are positive.
+
+    every trade                       1553 trades  -0.095R  CI [-0.161, -0.027]  halves -0.032 / -0.158  wins 0%   fail
+
+  Read, not judged:
+    FX (15 pairs)                      855 trades  -0.113R  CI [-0.199, -0.026]  halves -0.025 / -0.201  wins 0%
+    metals                             235 trades  +0.080R  CI [-0.090, +0.262]  halves +0.117 / +0.044  wins 0%
+    energies                           100 trades  +0.184R  CI [-0.201, +0.593]  halves +0.164 / +0.204  wins 0%
+    crypto                              63 trades  +0.266R  CI [-0.079, +0.638]  halves +0.500 / +0.040  wins 0%
+    stock indices                      300 trades  -0.348R  CI [-0.479, -0.209]  halves -0.402 / -0.294  wins 0%
+    long                               867 trades  -0.056R  CI [-0.148, +0.036]  halves -0.075 / -0.036  wins 0%
+    short                              686 trades  -0.144R  CI [-0.240, -0.042]  halves +0.018 / -0.306  wins 0%
+
+  before any cost: +0.008R a trade;  spread+commission -0.012R;  financing -0.092R
+

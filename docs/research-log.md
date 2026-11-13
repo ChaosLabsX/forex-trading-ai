@@ -12,7 +12,12 @@ commission), entries filled at the next bar's open, and judged by a bootstrap
 Six strategies, five mechanisms, ~37,000 simulated trades, 3-12.7 years of real
 history per instrument. Not one produced an edge that survives retail costs.
 The one funded on live, `london_breakout_v1`, has now been backtested exactly as
-it trades, and its CI sits entirely below zero (2026-11-04, next).
+it trades, and its CI sits entirely below zero (2026-11-04, below).
+
+A seventh strategy and sixth mechanism - slow trend-following on daily bars,
+28 markets, `trend_daily_v1` - failed its pre-registered test on 2026-11-13:
+-0.095R over 1,553 trades, CI [-0.161, -0.027], and a coin flip before costs
+(next).
 
 ## 2026-11-13 - Pre-registered: `trend_daily_v1`, slow trend-following, tested once
 
@@ -87,8 +92,8 @@ strategies would print.
    "real gross edge" (+0.044R, the finding this log calls the one that matters)
    was measured through a filter that could see the next few hours**, and a
    fade's worst trades are exactly the ones a peek at the coming range would
-   remove. The demo, which cannot peek, returned -0.080R gross over 272. Treat
-   that edge as unproven until re-measured (below).
+   remove. The demo, which cannot peek, returned -0.080R gross over 272. That
+   made the edge suspect; **re-measured below, it stands.**
 2. **No position was ever open.** Every strategy declines a symbol it already
    holds; the backtest showed it an empty book on every bar, so a signal that
    repeated during an open trade was counted again. Now one position per
@@ -107,6 +112,107 @@ Also new: overnight financing is charged per night held, from the broker's
 swap quote (today's rates applied to every year - crude, and stated in the
 output). A known simplification left as it is: a trade's first bar after entry
 is not walked, so a stop touched inside it is seen one bar late.
+
+**Amendment, still before the run: what history the broker actually has.**
+Downloading the 28 markets' bars (bars only; no strategy was run on them)
+showed two things the plan above did not know.
+
+- **Before 2016-2018 the non-FX markets have one bar a day.** The broker serves
+  its older years as a single daily bar on every intraday timeframe: gold,
+  silver and the stock indices until 2016, platinum and palladium until 2017,
+  bitcoin until 2018. A strategy clocked on H4 bars cannot be tested as it
+  trades on a day that has one of them. So each market is tested from its first
+  year of real intraday bars, found mechanically and without reference to
+  prices (`first_intraday_index`: bars per calendar day at least two-thirds of
+  the market's densest year). FX from 2014-01; gold, silver, US500, DE40,
+  UK100, JP225, HK50 from 2016-01; WTI 2016-06; natural gas 2016-08; platinum,
+  palladium 2017-01; bitcoin 2018-01.
+- **Four markets have under two years of history on this server:** USDCAD,
+  AUDJPY, CADJPY and AUS200 begin on 2025-01-02, and a clean re-download gives
+  the same. They stay in the test and contribute what they have. This also
+  means every earlier "16 symbols, 12.7 years" H4 backtest in this log
+  (`range_fade_h4_v1`) very likely ran those three FX pairs on far less than
+  12.7 years without saying so; the backtest now prints each symbol's span.
+
+So the sample is smaller than predicted - nearer 10 years than 12.8 outside
+FX - and the trade-count prediction is revised down to 1,000-1,800. Nothing
+else in the pre-registration changes.
+
+**Result (2026-11-13, run once, on the owner's machine; output kept in
+`docs/backtest-output/2026-11-13-trend_daily_v1.txt`): FAIL.** 28 markets, 1,553 trades,
+2014-03 to 2026-11 (122 a year), managed stops, net R:
+
+| | Trades | Net | 95% CI | Halves | |
+|---|---|---|---|---|---|
+| every trade | 1,553 | **-0.095R** | **[-0.161, -0.027]** | -0.032 / -0.158 | fail |
+
+| Per trade | |
+|---|---|
+| before any cost | +0.008R, CI [-0.057, +0.075] |
+| spread + commission | -0.012R (median 0.005R) |
+| overnight financing | -0.092R |
+
+- **The question was answered, and the answer is no.** Cost was taken out of
+  the way as designed - a hundredth of the risk - and what was left is a coin
+  flip: +0.008R a trade before any cost. A daily close out of a 55-day range
+  does not keep going, on these markets, over these years.
+- **Financing is the toll at this horizon, and it is larger than spread ever
+  was.** 142.5R of the 160.6R in costs. 104R of it fell on the six stock
+  indices (US500 alone: -45R over 63 trades). Today's swap rates applied to
+  every year overstate 2016-2021, when rates were near zero, and the dividend
+  credit to longs is not modelled - but the indices made +0.5R over 300 trades
+  before any cost, so at zero financing they are still nothing.
+- **Read, not judged:**
+
+  | Group | Trades | Net | 95% CI | Halves |
+  |---|---|---|---|---|
+  | FX (15 pairs) | 855 | -0.113R | [-0.199, -0.026] | -0.025 / -0.201 |
+  | stock indices | 300 | -0.348R | [-0.479, -0.209] | -0.402 / -0.294 |
+  | metals | 235 | +0.080R | [-0.090, +0.262] | +0.117 / +0.044 |
+  | energies | 100 | +0.184R | [-0.201, +0.593] | +0.164 / +0.204 |
+  | crypto | 63 | +0.266R | [-0.079, +0.638] | +0.500 / +0.040 |
+  | long | 867 | -0.056R | [-0.148, +0.036] | -0.075 / -0.036 |
+  | short | 686 | -0.144R | [-0.240, -0.042] | +0.018 / -0.306 |
+
+  FX loses before costs too (-0.078R gross): breakouts in FX revert at this
+  horizon as they did at H1.
+- **The prediction, scored.** Trade count (revised) and cost held. Half the
+  trades were full losses (784, 50.5%), as predicted. Financing came in a
+  little worse than the range given (-0.092R against -0.02R to -0.08R). Two
+  calls were wrong: FX is not "about zero" but negative, and the stock indices
+  are not "positive long" but the worst group in the test. The whole landed
+  below the predicted range, on the "more likely" side: a fail.
+- Max drawdown 184.6R; 18 losses in a row. The "stops held fixed" block the
+  backtest prints means nothing for a strategy with no target (unmanaged, a
+  trade can only end in a full loss or the one-year limit) and is not a result.
+- **What this does not license: "commodities and crypto only".** Gold (+0.418R
+  over 59), bitcoin (+0.266R over 63) and oil (+0.248R over 50) are the
+  positive names, and three positive groups of five, none with a CI above
+  zero, picked after the result, is the gold finding of this log over again -
+  the one that was noise, from the hypothesis that then failed 0 for 8. By the
+  rule written above before the run, a pass in a part is not a pass.
+
+`trend_daily_v1` is not promoted to the lab. It stays registered for
+`scripts/backtest.py` and is not in `config/plugins.yaml`.
+
+**`range_fade_v1`, re-measured on the corrected backtest (2026-11-14): its
+gross edge stands, and the suspicion in fault 1 above was wrong.** No
+look-ahead, one position per symbol, financing charged; output in
+`docs/backtest-output/2026-11-14-range_fade_v1-corrected.txt`:
+
+| | Trades | Gross | Gross CI | Net | Net CI |
+|---|---|---|---|---|---|
+| as recorded | 6,033 | +0.044R | [+0.013, +0.074] | -0.032R | [-0.063, -0.001] |
+| corrected | 5,567 | **+0.041R** | **[+0.011, +0.071]** | -0.042R | [-0.072, -0.012] |
+
+The look-ahead was real, but it did not make this result: with the filter
+blind to the forming bar the signal is the same size. Halves as before - first
++0.025R (CI spans zero), second +0.057R (above it). So this log's central
+finding is unchanged and now rests on a cleaner measurement: mean reversion at
+H1 predicts price by about 0.04R a trade, and costs of about 0.07R a trade
+exceed it. (Run on a Saturday, so the spread is the last quote; gross does not
+depend on it.) The demo's -0.080R gross over 272 trades remains the open
+disagreement with it, at under two standard errors.
 
 ## 2026-11-13 - Full audit: live is now net negative, and the cap did not bind on one bar
 
@@ -663,6 +769,7 @@ was already not converging.
 | `range_fade_h4_v1` | Same logic as `range_fade_v1`, at H4 | 5,715 | −0.042R | **negative** (retired 2026-09-16) |
 | `london_breakout_crosses_v1` | Same logic as `london_breakout_v1`, 5 EUR/GBP/CHF/CAD crosses | 1,171 | −0.132R | **negative** (CI entirely below zero; failed its pre-registered screen; retired 2026-09-16) |
 | `london_breakout_wide_v1` | `london_breakout_v1` with a 1.75x compression limit | 2,129 | −0.052R | zero (v1 re-run same day: −0.060R over 1,070); retired 2026-11-03 after -0.099R over 58 demo trades |
+| `trend_daily_v1` | Slow trend-following: daily close out of a 55-day range, 28 markets | 1,553 | −0.095R | **negative** (CI entirely below zero; gross +0.008R; failed its pre-registered test 2026-11-13; never in the lab) |
 
 Six strategies, five mechanisms: `range_fade_h4_v1` and `donchian_trending_v1`
 are not new ideas, they are the *same* mechanism aimed at unseen data - which is
@@ -922,10 +1029,11 @@ follow-up and for a sign-versus-magnitude decomposition.
 
 ## What has NOT been tested
 
-- **Slow momentum.** Time-series momentum has real academic support, but at
-  1-12 **month** horizons in diversified futures portfolios - not H1 bars. That
-  is a genuinely different claim. It is also nearly unvalidatable here: a few
-  trades per year means decades to reach a judgeable sample.
+- **Slow momentum - now tested once (2026-11-13, `trend_daily_v1`): fail.**
+  That was a 55-day breakout on this broker's CFDs. It is not the literature's
+  12-month return-sign rule in futures, which stays untested here - and the
+  financing this broker charges on a position held for weeks (0.09R a trade,
+  most of it on stock indices) would be charged on that too.
 - **Non-price edges** (carry, positioning, fundamentals). Different data, not a
   different indicator.
 

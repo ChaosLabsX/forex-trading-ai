@@ -30,7 +30,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import backtest                                                                    # noqa: E402
 from backtest import (                                                             # noqa: E402
-    StopManager, SymbolCosts, closed_context, commission_for, cost_in_r, nights_held,
+    StopManager, SymbolCosts, closed_context, commission_for, cost_in_r, first_intraday_index, nights_held,
     run_backtest_for_symbol, simulate_outcome, simulate_trade, swap_in_r, swap_terms,
 )
 from engine.config import Settings                                                 # noqa: E402
@@ -233,6 +233,28 @@ def main() -> int:
                         swap_terms(7, -5.0, -5.0, 0.01, 1.0), (0.0, 0.0, 0.0, 0.0, False)))
     passed.append(check("...including money in a currency that is not the price's own",
                         swap_terms(3, -5.0, -5.0, 0.01, 1.0, contract_size=1.0)[4], False))
+
+    print("\na symbol is tested only where its intraday history is real")
+
+    def year_of(year: int, bars_a_day: int, first_month: int = 1) -> list[Candle]:
+        day, out = datetime(year, first_month, 1, tzinfo=UTC), []
+        while day.year == year:
+            out += [Candle("X", H4, day + timedelta(hours=4 * k), 1, 1, 1, 1, 1.0) for k in range(bars_a_day)]
+            day += timedelta(days=1)
+        return out
+
+    gold_like = year_of(2014, 1) + year_of(2015, 1) + year_of(2016, 6) + year_of(2017, 6)
+    passed.append(check("two years of one bar a day, then real H4 bars: starts at the first real year",
+                        gold_like[first_intraday_index(gold_like)].time, datetime(2016, 1, 1, tzinfo=UTC)))
+    capped = year_of(2023, 6, first_month=8) + year_of(2024, 6) + year_of(2025, 6)
+    passed.append(check("a first year that is only partial (the bar cap landed in August) is dense: all of it stays",
+                        first_intraday_index(capped), 0))
+    patchy = year_of(2019, 6) + year_of(2020, 1) + year_of(2021, 6) + year_of(2022, 6)
+    passed.append(check("a daily-only year in the middle: starts after it, not before",
+                        patchy[first_intraday_index(patchy)].time, datetime(2021, 1, 1, tzinfo=UTC)))
+    passed.append(check("a single year of data: nothing to compare, nothing dropped", first_intraday_index(year_of(2025, 6)), 0))
+    stub = year_of(2024, 6)[-9:] + year_of(2025, 6) + year_of(2026, 6)
+    passed.append(check("a two-day stub of a year cannot set the standard for the full ones", first_intraday_index(stub), 0))
 
     print("\ncommission only where the broker charges it")
     passed.append(check("FX and metals: $7 a lot",
