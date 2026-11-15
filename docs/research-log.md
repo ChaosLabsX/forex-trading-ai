@@ -231,8 +231,11 @@ or parameter was changed; nothing here is a variant.
   - the backtest's cost figure, measured on real fills.
 - **Execution is not the problem.** Entry slippage: median +0.012R live (p90
   +0.087R), +0.007R demo. Stops return about -1.1R and targets +1.4R on both
-  accounts. No heartbeat gap during market hours in the last 30 days. There is
-  no execution fix that turns a gross of about zero into an edge.
+  accounts. Both engines evaluated every open-market hour from 2026-09-15 to
+  2026-11-15: 1,030 of 1,030, read from `signals` (this line first said "no
+  heartbeat gap in 30 days", but heartbeats are kept only 7 days). A live
+  signal reaches an open position in 0.24s at the median. There is no
+  execution fix that turns a gross of about zero into an edge.
 - **The demo's one spurious trade was still being counted.** The 2026-09-09
   01:00 EURUSD +1.78R - recorded below as fired on a 7-hours-wrong clock, with
   the instruction to exclude it from the verdict - had never been voided. It is
