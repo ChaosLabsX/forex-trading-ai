@@ -478,7 +478,8 @@ def run_backtest_for_symbol(
     # get_history, not get_candles: years of bars cross many daylight-saving
     # switches, and one offset for all of them put london_breakout's session an
     # hour off for two thirds of every year (found 2026-11-03).
-    entry_all = md.get_history(symbol, entry_tf, ENTRY_HISTORY_BARS)[:-1]  # drop forming bar
+    history = getattr(strategy, "backtest_history_bars", ENTRY_HISTORY_BARS)
+    entry_all = md.get_history(symbol, entry_tf, history)[:-1]  # drop forming bar
     if len(entry_all) <= entry_window + 2:
         return []
     # Said out loud, because the terminal serves whatever history it has

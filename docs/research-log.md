@@ -17,7 +17,119 @@ it trades, and its CI sits entirely below zero (2026-11-04, below).
 A seventh strategy and sixth mechanism - slow trend-following on daily bars,
 28 markets, `trend_daily_v1` - failed its pre-registered test on 2026-11-13:
 -0.095R over 1,553 trades, CI [-0.161, -0.027], and a coin flip before costs
-(next).
+(below).
+
+`range_fade_index_v1` - the one real signal, moved to commission-free stock
+indices - failed its pre-registered test on 2026-11-17: -0.025R over 5,655
+trades, CI [-0.055, +0.006]. Its gross, +0.048R with a CI above zero, confirms
+the signal on unseen markets, and confirms again that it is smaller than the
+toll (next).
+
+## 2026-11-17 - Pre-registered: `range_fade_index_v1`, the one real signal on cheaper markets
+
+Written before the backtest that tests it has been run on any symbol.
+
+**Why this one.** The owner asked for more strategies to test, so that one that
+works can go live. Three candidates were checked against the literature first;
+two died there, before any code:
+
+- **Market intraday momentum** (Gao, Han, Li & Zhou, *JFE* 2018: the first
+  half-hour of the US session predicts the last). Out-of-sample work is mixed -
+  one global study finds the predictability gone out of sample, another finds
+  the US sign reversed - and a 2026 retest on 1,085 SPX sessions of the
+  0DTE-options era finds it flat in every year since 2022. That retest is a
+  blog post, not peer-reviewed, but nothing here argues the other way, and
+  this broker's hourly bars could not isolate a half-hour anyway.
+- **The dollar's pattern around the FX fixes** (Krohn, Mueller & Whelan, *JF*
+  2024: it strengthens into each fix and weakens after). The authors' own
+  finding is that clients cannot arbitrage it - returns after transaction
+  costs are significantly negative; only dealers, who earn the spread, profit.
+  At ~2 bp a day against ~1 bp of cost per FX round trip here, they are right.
+
+**The third is built:** `range_fade_v1`, unchanged, on stock indices. It is the
+only signal this log has measured to predict price before costs - +0.041R a
+trade gross, CI [+0.011, +0.071], 5,567 FX trades (2026-11-14) - and it loses
+only because FX costs ~0.07R a trade, most of it the $7/lot commission. Stock
+index CFDs here carry no commission. This is the kind of variant the standing
+rule permits: the same mechanism aimed at data it has never seen, with a
+prediction, like `donchian_trending_v1`. It is one test, so no
+multiple-comparison correction is needed; testing several ideas and keeping the
+best would need one.
+
+**The rules, fixed now.** `evaluate()` is `range_fade_v1`'s own function
+object (asserted in `scripts/test_range_fade_index.py`, 14/14): fade an H1 close
+1.5 ATR(14) beyond EMA(20) when H4 ADX(14) < 20, stop 1 ATR, target 1.5 ATR, 07-20
+UTC only, the engine's stop management (to entry at +1R, trailing 1R past +2R).
+
+**The six markets, by a rule already on record:** one stock index per region,
+the list `trend_daily_v1` fixed on 2026-11-13 - US500, DE40, UK100, JP225,
+AUS200, HK50. Not chosen for this test. The Asian three trade their futures'
+night session inside 07-20 UTC; that is kept, not filtered.
+
+**The test.** `scripts/backtest.py range_fade_index_v1`, run once: 99,999 H1 bars
+a symbol (the terminal's cap; probed today: real hourly history from 2016 for
+five, from 2025-01-02 for AUS200, the known gap on this server), each market
+starting at its first year of real intraday bars. Net of spread (a live
+snapshot at run time: US500 0.5, DE40 0.5, UK100 0.9, JP225 4.0, AUS200 1.2,
+HK50 5.0 points when probed), no commission, and overnight financing at today's
+swap rates.
+
+**Pass criteria** - the same as `trend_daily_v1`'s. Over every trade together:
+net expectancy with a 95% CI entirely above zero AND positive in both
+chronological halves. Anything less is a fail, recorded and not adjusted - no
+other band, stop, session, ADX ceiling or market list. Per-market lines are
+printed to be read; a pass in a part ("US500 only") is NOT a pass.
+
+**Prediction.** 3,000-6,000 trades. Cost at the median 0.02-0.05R, higher in the
+early years, when index levels were lower and today's spread was a larger share
+of the stop. Financing -0.01R to -0.03R a trade: most fades resolve within the
+day, and indices charge both sides. Gross: if the signal is a general effect,
++0.02R to +0.05R; if it was FX-specific or luck, about zero. Whole test: net
+between -0.05R and +0.03R. More likely a fail than a pass - the honest reading
+of a +0.04R signal against a cost that is lower here, not gone.
+
+**What a pass would and would not mean.** A candidate for the demo lab, never
+for live directly. The demo would need ~100 trades - two to three months at
+this rate - and two things first: the news blackout has no currency mapping for
+indices (`ALL_CURRENCIES`), and the AI reviewer has never seen an index trade.
+
+### Result (2026-11-17, run once, 15:55-16:03 UTC): FAIL - and the signal replicated
+
+Output: `docs/backtest-output/2026-11-17-range_fade_index_v1.txt`.
+
+| | Trades | Gross | Gross CI | Net | Net CI |
+|---|---|---|---|---|---|
+| **all six** | **5,655** | **+0.048R** | **[+0.018, +0.078]** | **-0.025R** | **[-0.055, +0.006]** |
+| first half | 2,827 | +0.065R | [+0.023, +0.107] | -0.022R | [-0.065, +0.020] |
+| second half | 2,828 | +0.031R | [-0.011, +0.073] | -0.027R | [-0.069, +0.015] |
+
+The net CI includes zero and both halves are negative: **fail** on both
+criteria. Not adjusted, not re-run.
+
+Every number landed inside its prediction: 5,655 trades (3,000-6,000), spread
+0.042R at the median (0.02-0.05), financing -0.027R (-0.01 to -0.03), gross
++0.048R (the "general effect" branch, +0.02 to +0.05), net -0.025R (-0.05 to
++0.03).
+
+**What it adds, and it is the most solid finding in this log:** the
+mean-reversion signal predicted price on six markets it had never seen, by
+almost exactly the amount it did on FX (+0.048R vs +0.041R), across ~10 years.
+It is real, and it is not an FX artefact. And again it is smaller than the toll:
+no commission here, but spread (0.042R) plus financing (0.027R) come to the same
+~0.07R FX charged. **Removing financing does not rescue it:** -0.025R + 0.027R
+= +0.002R, which is zero. So "close before the rollover" is not worth a test.
+Neither is a market subset: AUS200 is positive net (+0.154R, CI [+0.002,
++0.304]) over 219 trades and two years - one of six, a part, the gold pattern
+again - and UK100's gross is significant while its net is not.
+
+`range_fade_index_v1` is not promoted to the lab. It stays registered for
+`scripts/backtest.py` and is not in `config/plugins.yaml`.
+
+**What this means for the next search.** Two asset classes now say the same
+thing: this broker's round-trip toll (spread + commission + financing) is
+~0.07R on a 1-ATR H1 stop, and the best signal found here is worth ~0.045R. The
+gap, ~0.025R, does not close by moving the same signal to another market at
+this broker.
 
 ## 2026-11-13 - Pre-registered: `trend_daily_v1`, slow trend-following, tested once
 
@@ -773,6 +885,7 @@ was already not converging.
 | `london_breakout_crosses_v1` | Same logic as `london_breakout_v1`, 5 EUR/GBP/CHF/CAD crosses | 1,171 | −0.132R | **negative** (CI entirely below zero; failed its pre-registered screen; retired 2026-09-16) |
 | `london_breakout_wide_v1` | `london_breakout_v1` with a 1.75x compression limit | 2,129 | −0.052R | zero (v1 re-run same day: −0.060R over 1,070); retired 2026-11-03 after -0.099R over 58 demo trades |
 | `trend_daily_v1` | Slow trend-following: daily close out of a 55-day range, 28 markets | 1,553 | −0.095R | **negative** (CI entirely below zero; gross +0.008R; failed its pre-registered test 2026-11-13; never in the lab) |
+| `range_fade_index_v1` | Same logic as `range_fade_v1`, six stock indices (no commission) | 5,655 | −0.025R | zero (CI [-0.055, +0.006], both halves negative; **gross +0.048R, CI above zero**; failed its pre-registered test 2026-11-17; never in the lab) |
 
 Six strategies, five mechanisms: `range_fade_h4_v1` and `donchian_trending_v1`
 are not new ideas, they are the *same* mechanism aimed at unseen data - which is

@@ -1,0 +1,191 @@
+Broker clock: UTC+2h now, New-York-close convention confirmed - every historical bar gets the offset in force when it formed.
+
+Backtesting 'range_fade_index_v1' over 6 instrument(s)
+  entry H1  ·  timeframes H1(300)  H4(250)
+
+Per-instrument (net of costs):
+
+  (US500: 65010 H1 bars, from 2012-08-05; tested from 2016-01-03, daily-only before)
+  (US500: skipped 1 signals whose stop was below the tradeable floor 0.60000 - they could not have been orders)
+US500:
+  trades           1376  (493W / 712L / 171 at moved stop / 0 timeout)
+  win rate         35.8%  (target hits, of resolved)
+  net positive     35.8% of trades
+  total R          gross +35.00   net -63.27   (costs cut 98.28R)
+  financing        -31.08R in total, -0.023R a trade  (overnight swap, inside net)
+  expectancy       -0.046 R/trade
+  avg win / loss   +1.44R / -1.07R
+  profit factor    0.92
+  cost per trade   median 0.036R  p95 0.124R  max 0.228R
+  max drawdown     92.82R
+  longest losing   13 in a row
+  expectancy 95%CI [-0.108, +0.015] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.025 R/trade  95%CI [-0.036, +0.086]  -> signal not distinguishable from zero
+
+  (DE40: 63922 H1 bars, from 2012-08-05; tested from 2016-01-03, daily-only before)
+DE40:
+  trades           1206  (428W / 621L / 157 at moved stop / 0 timeout)
+  win rate         35.5%  (target hits, of resolved)
+  net positive     35.5% of trades
+  total R          gross +20.63   net -24.19   (costs cut 44.82R)
+  financing        -28.24R in total, -0.023R a trade  (overnight swap, inside net)
+  expectancy       -0.020 R/trade
+  avg win / loss   +1.46R / -1.03R
+  profit factor    0.96
+  cost per trade   median 0.013R  p95 0.024R  max 0.054R
+  max drawdown     63.69R
+  longest losing   18 in a row
+  expectancy 95%CI [-0.085, +0.045] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.017 R/trade  95%CI [-0.048, +0.082]  -> signal not distinguishable from zero
+
+  (UK100: 63710 H1 bars, from 2012-08-05; tested from 2016-01-03, daily-only before)
+UK100:
+  trades           1391  (532W / 641L / 218 at moved stop / 0 timeout)
+  win rate         38.2%  (target hits, of resolved)
+  net positive     38.2% of trades
+  total R          gross +156.38   net +52.19   (costs cut 104.19R)
+  financing        -28.47R in total, -0.020R a trade  (overnight swap, inside net)
+  expectancy       +0.038 R/trade
+  avg win / loss   +1.42R / -1.07R
+  profit factor    1.07
+  cost per trade   median 0.054R  p95 0.084R  max 0.127R
+  max drawdown     28.35R
+  longest losing   14 in a row
+  expectancy 95%CI [-0.022, +0.097] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.112 R/trade  95%CI [+0.053, +0.172]  -> signal POSITIVE
+     ^ the idea predicts price, but costs exceed what it predicts
+
+  (JP225: 65230 H1 bars, from 2012-08-05; tested from 2016-01-03, daily-only before)
+  (JP225: skipped 1 signals whose stop was below the tradeable floor 8.00000 - they could not have been orders)
+JP225:
+  trades           919  (326W / 469L / 124 at moved stop / 0 timeout)
+  win rate         35.5%  (target hits, of resolved)
+  net positive     35.5% of trades
+  total R          gross +20.88   net -78.02   (costs cut 98.91R)
+  financing        -47.68R in total, -0.052R a trade  (overnight swap, inside net)
+  expectancy       -0.085 R/trade
+  avg win / loss   +1.39R / -1.10R
+  profit factor    0.85
+  cost per trade   median 0.052R  p95 0.107R  max 0.210R
+  max drawdown     94.65R
+  longest losing   18 in a row
+  expectancy 95%CI [-0.159, -0.010] R/trade  -> edge negative
+  GROSS expectancy +0.023 R/trade  95%CI [-0.052, +0.098]  -> signal not distinguishable from zero
+
+  (AUS200: 10744 H1 bars, from 2025-01-01)
+AUS200:
+  trades           219  (96W / 90L / 33 at moved stop / 0 timeout)
+  win rate         43.8%  (target hits, of resolved)
+  net positive     43.8% of trades
+  total R          gross +53.10   net +33.80   (costs cut 19.30R)
+  financing        -5.48R in total, -0.025R a trade  (overnight swap, inside net)
+  expectancy       +0.154 R/trade
+  avg win / loss   +1.40R / -1.08R
+  profit factor    1.34
+  cost per trade   median 0.064R  p95 0.088R  max 0.105R
+  max drawdown     8.34R
+  longest losing   8 in a row
+  expectancy 95%CI [+0.002, +0.304] R/trade  -> edge POSITIVE
+  GROSS expectancy +0.242 R/trade  95%CI [+0.090, +0.393]  -> signal POSITIVE
+
+  (HK50: 45840 H1 bars, from 2012-08-05; tested from 2016-01-04, daily-only before)
+HK50:
+  trades           544  (193W / 296L / 55 at moved stop / 0 timeout)
+  win rate         35.5%  (target hits, of resolved)
+  net positive     35.1% of trades
+  total R          gross -14.69   net -60.56   (costs cut 45.88R)
+  financing        -14.38R in total, -0.026R a trade  (overnight swap, inside net)
+  expectancy       -0.111 R/trade
+  avg win / loss   +1.36R / -1.08R
+  profit factor    0.81
+  cost per trade   median 0.057R  p95 0.089R  max 0.168R
+  max drawdown     68.51R
+  longest losing   16 in a row
+  expectancy 95%CI [-0.208, -0.011] R/trade  -> edge negative
+  GROSS expectancy -0.027 R/trade  95%CI [-0.124, +0.074]  -> signal not distinguishable from zero
+
+============================================================
+History span of signals: 2016-04-27 19:00:00+00:00  ->  2026-11-17 12:00:00+00:00
+Commission assumed: $7.00 round-turn per 1.0 lot on FX and metals, none on indices, energies and crypto (as this account's deals show)
+Trade rate: 536/year  ->  ~0.2 years to reach 100 live trades
+
+Stop management (as the engine trades): stop to entry at +1R, trailing 1R behind past +2R
+
+ALL INSTRUMENTS:
+  trades           5655  (2068W / 2829L / 758 at moved stop / 0 timeout)
+  win rate         36.6%  (target hits, of resolved)
+  net positive     36.5% of trades
+  total R          gross +271.32   net -140.05   (costs cut 411.37R)
+  financing        -155.32R in total, -0.027R a trade  (overnight swap, inside net)
+  expectancy       -0.025 R/trade
+  avg win / loss   +1.42R / -1.07R
+  profit factor    0.95
+  cost per trade   median 0.042R  p95 0.096R  max 0.228R
+  max drawdown     202.73R
+  longest losing   22 in a row
+  expectancy 95%CI [-0.055, +0.006] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.048 R/trade  95%CI [+0.018, +0.078]  -> signal POSITIVE
+     ^ the idea predicts price, but costs exceed what it predicts
+
+ALL INSTRUMENTS, stops held FIXED (the pre-2026-10-12 model):
+  trades           5655  (2360W / 3295L / 0 timeout)
+  win rate         41.7%  (target hits, of resolved)
+  net positive     41.7% of trades
+  total R          gross +244.45   net -189.21   (costs cut 433.66R)
+  financing        -177.61R in total, -0.031R a trade  (overnight swap, inside net)
+  expectancy       -0.033 R/trade
+  avg win / loss   +1.42R / -1.07R
+  profit factor    0.95
+  cost per trade   median 0.042R  p95 0.096R  max 0.228R
+  max drawdown     235.52R
+  longest losing   17 in a row
+  expectancy 95%CI [-0.065, -0.002] R/trade  -> edge negative
+  GROSS expectancy +0.043 R/trade  95%CI [+0.012, +0.076]  -> signal POSITIVE
+     ^ the idea predicts price, but costs exceed what it predicts
+
+Managed vs fixed: 758 of 5655 trades end differently; expectancy -0.025R vs -0.033R (+0.009R per trade)
+
+Chronological stability (does the edge persist across time?):
+
+  first half:
+  trades           2827  (1055W / 1400L / 372 at moved stop / 0 timeout)
+  win rate         37.3%  (target hits, of resolved)
+  net positive     37.2% of trades
+  total R          gross +184.59   net -62.60   (costs cut 247.19R)
+  financing        -95.84R in total, -0.034R a trade  (overnight swap, inside net)
+  expectancy       -0.022 R/trade
+  avg win / loss   +1.41R / -1.08R
+  profit factor    0.96
+  cost per trade   median 0.052R  p95 0.113R  max 0.228R
+  max drawdown     105.72R
+  longest losing   13 in a row
+  expectancy 95%CI [-0.065, +0.020] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.065 R/trade  95%CI [+0.023, +0.107]  -> signal POSITIVE
+     ^ the idea predicts price, but costs exceed what it predicts
+
+  second half:
+  trades           2828  (1013W / 1429L / 386 at moved stop / 0 timeout)
+  win rate         35.8%  (target hits, of resolved)
+  net positive     35.8% of trades
+  total R          gross +86.73   net -77.45   (costs cut 164.18R)
+  financing        -59.48R in total, -0.021R a trade  (overnight swap, inside net)
+  expectancy       -0.027 R/trade
+  avg win / loss   +1.43R / -1.05R
+  profit factor    0.95
+  cost per trade   median 0.035R  p95 0.076R  max 0.168R
+  max drawdown     120.81R
+  longest losing   22 in a row
+  expectancy 95%CI [-0.069, +0.015] R/trade  -> edge not distinguishable from zero
+  GROSS expectancy +0.031 R/trade  95%CI [-0.011, +0.073]  -> signal not distinguishable from zero
+
+Caveats - read before trusting any number above:
+  - Costs use a live spread SNAPSHOT; real spreads widen at news/rollover.
+  - Commission is an assumption (COMMISSION_PER_LOT_ROUNDTURN) - set it to your schedule.
+  - Intrabar order is unknown; same-bar stop+target counts as a loss (conservative).
+  - Stops are managed once per entry-timeframe bar, after its worst price; the engine checks every 5s.
+  - Overnight financing uses TODAY's swap rates for every year; rates and their sign have changed.
+  - Index prices fall on ex-dividend days and the CFD credits a long for it; that credit is not modelled.
+  - One broker, one account, one historical path. Demo spreads differ from live.
+  - Parameters were NOT optimised here, but this is still in-sample, not walk-forward.
+  - A positive, tight, above-zero CI means 'worth forward-testing', not 'guaranteed'.
+

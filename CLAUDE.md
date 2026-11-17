@@ -21,10 +21,13 @@ refusal is the product.
 - **2 strategies** run in the demo lab across 16 instruments: `ema_trend_v1`
   and `london_breakout_v1`. Six more are retired and no longer loaded, but still
   registered, so they can be backtested.
-- **No demonstrated edge. Nothing is READY.** ~38,500 simulated trades across
-  6 mechanisms and up to 12.7 years of history. The latest, slow trend-following
-  on daily bars (`trend_daily_v1`, 28 markets), failed its pre-registered test
-  on 2026-11-13 and is registered for backtests only. See
+- **No demonstrated edge. Nothing is READY.** ~44,000 simulated trades across
+  6 mechanisms and up to 12.7 years of history. The latest two failed their
+  pre-registered tests and are registered for backtests only: slow
+  trend-following on daily bars (`trend_daily_v1`, 28 markets, 2026-11-13), and
+  `range_fade_v1` moved to six commission-free stock indices
+  (`range_fade_index_v1`, 2026-11-17) - whose gross edge, +0.048R, replicated
+  and is still smaller than the ~0.07R toll. See
   [`docs/research-log.md`](docs/research-log.md) - **read it before proposing a
   strategy.**
 - **LIVE TRADING IS ON, for exactly one strategy.** Since 2026-09-05 the live

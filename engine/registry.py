@@ -21,6 +21,7 @@ PLUGIN_REGISTRY: dict[str, dict[str, str]] = {
         "london_breakout_wide_v1": "engine.plugins.strategies.london_breakout_wide_v1:LondonBreakoutWideStrategy",
         "range_fade_v1": "engine.plugins.strategies.range_fade_v1:RangeFadeStrategy",
         "range_fade_h4_v1": "engine.plugins.strategies.range_fade_h4_v1:RangeFadeH4Strategy",
+        "range_fade_index_v1": "engine.plugins.strategies.range_fade_index_v1:RangeFadeIndexStrategy",
         "donchian_breakout_v1": "engine.plugins.strategies.donchian_breakout_v1:DonchianBreakoutStrategy",
         "donchian_trending_v1": "engine.plugins.strategies.donchian_trending_v1:DonchianTrendingStrategy",
         "trend_daily_v1": "engine.plugins.strategies.trend_daily_v1:TrendDailyStrategy",

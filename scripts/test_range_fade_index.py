@@ -1,0 +1,136 @@
+r"""range_fade_index_v1 moves exactly one thing - the markets - and never trades by accident.
+
+    python scripts\test_range_fade_index.py
+
+It is an out-of-sample test of range_fade_v1, so its logic must be provably the
+parent's: the same evaluate() function object, the same timeframes, and on
+identical candles the same signal. It must run on the six pre-registered
+indices, none of which range_fade_v1 has seen; the backtest must actually ask
+the broker for its deeper history (the real code path, not an attribute read);
+and it must not be loaded by either engine.
+"""
+from __future__ import annotations
+
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import yaml
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from engine.config import Settings                                                # noqa: E402
+from engine.core.interfaces.strategy import StrategyContext                       # noqa: E402
+from engine.core.models import AccountState, Candle, Timeframe                    # noqa: E402
+from engine.indicators import adx                                                 # noqa: E402
+from engine.plugins.strategies._common import UNIVERSE                            # noqa: E402
+from engine.plugins.strategies.range_fade_index_v1 import RangeFadeIndexStrategy  # noqa: E402
+from engine.plugins.strategies.range_fade_v1 import RangeFadeStrategy             # noqa: E402
+
+UTC = timezone.utc
+ROOT = Path(__file__).resolve().parent.parent
+ACCOUNT = AccountState(balance=1000, equity=1000, margin_used=0, open_positions_count=0,
+                       daily_pnl=0, consecutive_stop_losses_today=0)
+INDICES = ("US500", "DE40", "UK100", "JP225", "AUS200", "HK50")
+
+
+def check(label: str, got, want) -> bool:
+    ok = got == want
+    print(f"  [{'PASS' if ok else 'FAIL'}] {label}")
+    if not ok:
+        print(f"         expected: {want}\n         actual  : {got}")
+    return ok
+
+
+def quiet_market(symbol: str, as_of: datetime) -> dict:
+    """A range-bound market (alternating bars: ADX near zero) whose last H1 bar
+    closes far below its mean - the setup range_fade fades, long."""
+    h4 = []
+    for i in range(60):
+        t = as_of - timedelta(hours=4 * (60 - i) + 3)
+        lo = 100.0 + (0.2 if i % 2 else 0.0)
+        h4.append(Candle(symbol, Timeframe.H4, t, lo + 0.5, lo + 1.0, lo, lo + 0.5, 1.0))
+    h1 = []
+    for i in range(60):
+        t = as_of - timedelta(hours=59 - i)
+        lo = 100.0 + (0.1 if i % 2 else 0.0)
+        h1.append(Candle(symbol, Timeframe.H1, t, lo + 0.2, lo + 0.4, lo, lo + 0.2, 1.0))
+    last = h1[-1]
+    h1[-1] = Candle(symbol, Timeframe.H1, last.time, 100.2, 100.4, 98.9, 99.0, 1.0)
+    return {Timeframe.H1: h1, Timeframe.H4: h4}
+
+
+def context(symbol: str, candles: dict) -> StrategyContext:
+    return StrategyContext(symbol=symbol, candles_by_timeframe=candles, account_state=ACCOUNT,
+                           open_positions=[], upcoming_news=())
+
+
+class RecordingHistory:
+    """Stands in for MT5MarketDataProvider: records what the backtest asks for
+    and returns too little to trade, so run_backtest_for_symbol stops there."""
+
+    def __init__(self) -> None:
+        self.asked: list[tuple[str, Timeframe, int]] = []
+
+    def get_history(self, symbol, timeframe, count):
+        self.asked.append((symbol, timeframe, count))
+        return []
+
+
+def main() -> int:
+    settings = Settings()
+    child, parent = RangeFadeIndexStrategy(settings), RangeFadeStrategy(settings)
+    results = []
+
+    print("the logic is the parent's, untouched")
+    results.append(check("evaluate() is the same function object",
+                         RangeFadeIndexStrategy.evaluate is RangeFadeStrategy.evaluate, True))
+    results.append(check("same timeframes", child.required_timeframes, parent.required_timeframes))
+    results.append(check("same entry / regime timeframes",
+                         (child.entry_tf, child.regime_tf), (parent.entry_tf, parent.regime_tf)))
+    results.append(check("own name", child.name, "range_fade_index_v1"))
+
+    print("the markets are the six pre-registered indices, none seen by range_fade_v1")
+    results.append(check("instruments", child.instruments, INDICES))
+    results.append(check("no overlap with range_fade_v1's markets",
+                         set(child.instruments) & set(UNIVERSE), set()))
+
+    print("on identical candles, the same signal")
+    as_of = datetime(2026, 11, 10, 14, tzinfo=UTC)
+    candles = quiet_market("US500", as_of)
+    results.append(check("fixture is range-bound (ADX < 20)", adx(candles[Timeframe.H4], 14) < 20, True))
+    a = child.evaluate(context("US500", candles)).signal
+    b = parent.evaluate(context("US500", candles)).signal
+    results.append(check("the child fires", a is not None, True))
+    if a is not None and b is not None:
+        results.append(check("direction, entry, stop, target identical",
+                             (a.direction, a.entry_price, a.stop_loss, a.take_profit),
+                             (b.direction, b.entry_price, b.stop_loss, b.take_profit)))
+        results.append(check("signal carries the child's name", a.strategy_name, "range_fade_index_v1"))
+    night = quiet_market("US500", datetime(2026, 11, 10, 22, tzinfo=UTC))
+    results.append(check("same 07-20 UTC session: silent at 22:00",
+                         child.evaluate(context("US500", night)).signal, None))
+
+    print("the backtest asks the broker for the deeper history (real code path)")
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import backtest as bt  # noqa: E402
+    md = RecordingHistory()
+    bt.run_backtest_for_symbol(child, md, "US500", manager=None)
+    results.append(check("child asks for 99,999 H1 bars", md.asked[:1], [("US500", Timeframe.H1, 99_999)]))
+    md = RecordingHistory()
+    bt.run_backtest_for_symbol(parent, md, "EURUSD", manager=None)
+    results.append(check("parent still asks for the default 20,000", md.asked[:1],
+                         [("EURUSD", Timeframe.H1, bt.ENTRY_HISTORY_BARS)]))
+
+    print("loaded by neither engine")
+    plugins = yaml.safe_load((ROOT / "config" / "plugins.yaml").read_text(encoding="utf-8"))
+    loaded = plugins["strategies"]
+    results.append(check("not in config/plugins.yaml", "range_fade_index_v1" in loaded, False))
+
+    passed = sum(results)
+    print(f"\n{passed}/{len(results)} passed")
+    return 0 if passed == len(results) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
