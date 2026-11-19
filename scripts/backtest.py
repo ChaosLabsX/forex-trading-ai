@@ -680,6 +680,13 @@ def summarize(label: str, outcomes: list[TradeOutcome]) -> None:
     )
     if glo > 0 and lo <= 0:
         print("     ^ the idea predicts price, but costs exceed what it predicts")
+    if swap_total:
+        # Financing is today's swap applied to every past year - for a pair
+        # whose rate gap has flipped sign since, a guess. A test can be judged
+        # without it, so it is shown without it too.
+        ex_rs = [o.net_r - o.swap_r for o in outcomes]
+        xlo, xhi = bootstrap_expectancy_ci(ex_rs)
+        print(f"  net w/o financing {sum(ex_rs) / n:+.3f} R/trade  95%CI [{xlo:+.3f}, {xhi:+.3f}]")
     print()
 
 

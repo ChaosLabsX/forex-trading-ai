@@ -28,7 +28,134 @@ toll (below).
 `range_fade_gold_v1` - the same signal on gold, the market where this
 broker's toll is smallest - failed its pre-registered test on 2026-11-19:
 -0.022R over 1,184 trades, CI [-0.088, +0.043]. The toll was half of FX's,
-and the gross, +0.010R, was not there to pay it (next).
+and the gross, +0.010R, was not there to pay it (below).
+
+`gotobi_usdjpy_v1` - long USD/JPY into the Tokyo fix on Japanese payment
+days - came closest of anything here, and failed on 2026-11-19. Over 16
+years, net +0.025R over 974 trades, CI [+0.008, +0.043], entirely above
+zero. But the edge sits in 2010-2018 (+0.054R) and the half since is
+-0.004R (next).
+
+## 2026-11-19 - Pre-registered: `gotobi_usdjpy_v1`, Japanese importers' dollar buying
+
+Written before the backtest that tests it has been run.
+
+**Why this one.** The owner asked for the search to continue, for strategies
+to try on demo. This is information the log has not used: **the calendar of
+a known group of buyers**. Japanese importers settle payments on dates
+divisible by five ("gotobi") and buy their dollars at the 09:55 Tokyo fix,
+so dollar demand that morning is predictable from the date alone.
+
+- Ito & Yamada (*Journal of International Economics* 109, 2017; data to
+  ~2015): order flow before the Tokyo fix leans predictably toward buying
+  dollars, and the fix is biased toward dollar strength. They put it down
+  to institutional features and corporate hedging needs - a structure, not
+  a pattern.
+- Bessho, Sugimoto & Suzuki (arXiv 2301.13204, 2023; one-minute EBS data,
+  2018-2020): USD/JPY rises from about 03:00 Tokyo to the fix on gotobi
+  days, Tuesday to Friday. Long 03:00 to 09:55 with no filter: 185 trades,
+  profit factor 1.46, 60% winners, net of spread. The same window on other
+  days loses. Their filtered version (a moving-average cross) is fitted to
+  its own sample and is not used here.
+- Against it: a preprint, three in-sample years, no persistence test, and no
+  re-test since 2020 was found. If the custom fades, so does the effect.
+
+It clears the two limits the 2026-11-14 entry set. ~61 independent mornings
+a year for 16 years. Financing is one night, and is excluded from the verdict
+anyway (below). Cost: a stop of one daily ATR puts the round trip at
+~0.014R. Measured today: spread 1 point, $7/lot, by year 0.008-0.022R.
+
+**The rules, fixed now** (`engine/plugins/strategies/gotobi_usdjpy_v1.py`,
+asserted in `scripts/test_gotobi_usdjpy.py`, 19/19, through the real backtest
+path):
+
+- A Tokyo date is gotobi if divisible by five; a gotobi Saturday or Sunday
+  moves to the Friday before. Mondays are left out, as in the paper.
+  Japanese public holidays are not modelled.
+- Long USD/JPY at the close of the H1 bar ending 18:00 UTC (03:00 Tokyo;
+  Japan has no daylight saving). The backtest fills at the next bar's open.
+- Exit by time: marked out at the close of the 00:00-01:00 UTC bar, i.e.
+  10:00 Tokyo, the fix plus five minutes. Hourly bars cannot end at 09:55.
+- Stop one ATR(14) on daily bars below entry, as a disaster stop; no target.
+  The engine's stop management applies, as in every test here.
+
+**The test.** `scripts/backtest.py gotobi_usdjpy_v1`, run once: 99,999 H1
+bars (real hourly history from 2010-10-13), 977 gotobi mornings in the span
+(counted from the calendar, before any price was read). Spread is a live
+snapshot; commission is $7/lot. Financing at today's swap (long +8.276
+points a night) is charged by the model. But USD/JPY's rate gap was near
+zero for most of 2010-2021, so a credit at today's rate would flatter it.
+**The verdict excludes financing**: `scripts/backtest.py` now prints `net
+w/o financing` with its own CI for exactly this.
+
+**Pass criteria.** Net expectancy without financing, with a 95% CI entirely
+above zero, AND positive in both chronological halves (split near
+2018-11). The second half holds the paper's 2018-2020 years and everything
+since it was published. Anything less is a fail, recorded and not adjusted
+- no other entry hour, exit hour, stop, day rule, pair, or "Fridays only".
+
+**Prediction.** 940-980 trades. Cost 0.010-0.018R at the median. Spread
+between trades: a 7-hour move is ~0.3 of a daily ATR, so the 95% CI is
+about +/-0.02R wide. Drift: USD/JPY went 88 to 159 over the span, about
++0.002R per 7-hour hold - negligible. Gross +0.02R to +0.04R if the effect
+holds across 16 years at the paper's size (about 2-3 pips on a ~100-pip R);
+~0 if it was a 2018-2020 feature or is lost at hourly resolution. Net without
+financing: -0.015R to +0.03R. **A pass needs a gross of roughly +0.035R or
+more: about a coin flip if the effect is as published and stable, a fail if
+not.**
+
+**What a pass would and would not mean.** Not a demo strategy yet. Three
+things first:
+
+1. The engine has no timed exit. It would hold this trade until its stop.
+   One would have to be built and tested, and it touches live execution code.
+2. A control: the same window on non-gotobi Tuesday-Friday mornings, run
+   once. Gotobi must beat it, or what was measured is the hour, not the
+   calendar.
+3. The arithmetic of READY. At ~+0.03R and ~0.3R spread, a CI above zero
+   needs ~400 trades: ~6.5 years at 61 a year. The demo lab could watch it,
+   but could not certify it soon.
+
+### Result (2026-11-19, run once, 07:51-07:52 UTC): FAIL - real, and gone since 2018
+
+Output: `docs/backtest-output/2026-11-19-gotobi_usdjpy_v1.txt`.
+
+| Net w/o financing (the verdict) | Trades | Gross | Gross CI | Net | Net CI |
+|---|---|---|---|---|---|
+| **all, 2010-11 to 2026-11** | **974** | **+0.039R** | **[+0.021, +0.057]** | **+0.025R** | **[+0.008, +0.043]** |
+| first half (to 2018-11) | 487 | +0.069R | [+0.044, +0.095] | +0.054R | [+0.029, +0.081] |
+| second half (from 2018-11) | 487 | +0.009R | [-0.014, +0.031] | **-0.004R** | [-0.027, +0.018] |
+
+With the modelled financing, net is +0.035R overall, +0.065R and +0.005R by
+half. Seven of 974 trades reached the stop; the rest ended by time.
+
+**The net CI is entirely above zero - the first full sample in this log
+where that is true - and the second half is negative: fail.** The stability
+criterion exists for exactly this shape. Not adjusted, not re-run.
+
+Against the prediction: 974 trades (940-980), cost 0.013R at the median
+(0.010-0.018), CI +/-0.018R wide (+/-0.02). The gross, +0.039R, sits at the
+top of the "effect holds" branch overall. But it is not stable: +0.069R for
+eight years, then +0.009R for eight.
+
+**What it adds.** A real effect, measured: a calendar of known buyers moved
+USD/JPY by ~0.07R a morning from 2010 to 2018, more than clearing costs - the
+first edge in this log not made of price patterns. The second half spans
+the paper's own 2018-2020 sample and everything since its publication, and
+holds nothing an hourly bar can reach. Two readings fit, and this test
+cannot choose between them:
+
+- The custom faded, or was arbitraged once known.
+- The rise now ends nearer 09:55, and the 09:55-10:00 drop (sharp on gotobi
+  days, per the paper) eats it.
+
+Testing an earlier exit, Fridays, or the post-fix short would be the
+variant search this log forbids. It would be run on the same 16 years that
+already produced this answer.
+
+`gotobi_usdjpy_v1` is not promoted. It stays registered for
+`scripts/backtest.py`; it is not in `config/plugins.yaml`, and no timed exit
+is built for it.
 
 ## 2026-11-19 - Pre-registered: `range_fade_gold_v1`, the one real signal on gold
 

@@ -29,7 +29,10 @@ refusal is the product.
   (`range_fade_index_v1`, 2026-11-17) - whose gross edge, +0.048R, replicated
   and is still smaller than the ~0.07R toll. The same signal on gold alone,
   where the toll is half that (`range_fade_gold_v1`, 2026-11-19), also failed:
-  its gross was +0.010R, and -0.031R in the years no run had touched. See
+  its gross was +0.010R, and -0.031R in the years no run had touched. Closest
+  yet: `gotobi_usdjpy_v1` (Japanese payment-day dollar buying, 2026-11-19),
+  net +0.025R over 974 trades with a CI above zero - but all of it from
+  2010-2018, -0.004R since, so it fails the stability criterion. See
   [`docs/research-log.md`](docs/research-log.md) - **read it before proposing a
   strategy.**
 - **LIVE TRADING IS ON, for exactly one strategy.** Since 2026-09-05 the live

@@ -23,6 +23,7 @@ PLUGIN_REGISTRY: dict[str, dict[str, str]] = {
         "range_fade_h4_v1": "engine.plugins.strategies.range_fade_h4_v1:RangeFadeH4Strategy",
         "range_fade_index_v1": "engine.plugins.strategies.range_fade_index_v1:RangeFadeIndexStrategy",
         "range_fade_gold_v1": "engine.plugins.strategies.range_fade_gold_v1:RangeFadeGoldStrategy",
+        "gotobi_usdjpy_v1": "engine.plugins.strategies.gotobi_usdjpy_v1:GotobiUSDJPYStrategy",
         "donchian_breakout_v1": "engine.plugins.strategies.donchian_breakout_v1:DonchianBreakoutStrategy",
         "donchian_trending_v1": "engine.plugins.strategies.donchian_trending_v1:DonchianTrendingStrategy",
         "trend_daily_v1": "engine.plugins.strategies.trend_daily_v1:TrendDailyStrategy",
