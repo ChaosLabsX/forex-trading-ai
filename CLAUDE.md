@@ -27,7 +27,9 @@ refusal is the product.
   trend-following on daily bars (`trend_daily_v1`, 28 markets, 2026-11-13), and
   `range_fade_v1` moved to six commission-free stock indices
   (`range_fade_index_v1`, 2026-11-17) - whose gross edge, +0.048R, replicated
-  and is still smaller than the ~0.07R toll. See
+  and is still smaller than the ~0.07R toll. The same signal on gold alone,
+  where the toll is half that (`range_fade_gold_v1`, 2026-11-19), also failed:
+  its gross was +0.010R, and -0.031R in the years no run had touched. See
   [`docs/research-log.md`](docs/research-log.md) - **read it before proposing a
   strategy.**
 - **LIVE TRADING IS ON, for exactly one strategy.** Since 2026-09-05 the live

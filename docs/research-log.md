@@ -23,7 +23,138 @@ A seventh strategy and sixth mechanism - slow trend-following on daily bars,
 indices - failed its pre-registered test on 2026-11-17: -0.025R over 5,655
 trades, CI [-0.055, +0.006]. Its gross, +0.048R with a CI above zero, confirms
 the signal on unseen markets, and confirms again that it is smaller than the
-toll (next).
+toll (below).
+
+`range_fade_gold_v1` - the same signal on gold, the market where this
+broker's toll is smallest - failed its pre-registered test on 2026-11-19:
+-0.022R over 1,184 trades, CI [-0.088, +0.043]. The toll was half of FX's,
+and the gross, +0.010R, was not there to pay it (next).
+
+## 2026-11-19 - Pre-registered: `range_fade_gold_v1`, the one real signal on gold
+
+Written before the backtest that tests it has been run.
+
+**Why this one.** The owner asked for a strategy built for gold, since
+`london_breakout_v1` never trades it (gold's Asian range is never under 1.5
+ATR). Four candidates were weighed; three died before any code:
+
+- **Gold trend-following.** Already run twice on this gold history:
+  `donchian_breakout_v1` (+0.089R, the noise finding below) and
+  `trend_daily_v1` (+0.418R over 59, a part of a failed test). A third run on
+  the same bars re-tosses the same coin.
+- **Gold's time-of-day pattern** (up in Asian hours, down for the rest of the
+  day). The one direct study found is a master's thesis (Copenhagen Business
+  School): an effect before costs only, tied by its authors to the London Fix
+  before its 2015 reform - and the data here starts in 2016. It also needs an
+  exit at a set hour, which the engine does not have, so it could not be
+  traded as tested.
+- **Continuation after the 8:30 ET US data hour.** News surprises were
+  rejected 2026-11-14 (no forecast history; the widest-spread minutes). The
+  intraday-momentum work on gold futures is mixed - in China the predictive
+  half-hour moved when the session hours changed - and hourly bars cannot
+  isolate the minutes it lives in.
+
+**The fourth is built:** `range_fade_v1`, unchanged, on XAUUSD alone. This
+log's one replicated signal - +0.041R gross on FX, +0.048R on six stock
+indices - lost both times to a ~0.07R toll. Gold is where the toll here is
+smallest, and it shrinks as gold rises: spread and commission are fixed in
+dollars while the hourly range grew with the price. Measured today with
+`scripts/backtest.py`'s own cost model (today's 8-point spread, $7/lot) at
+each year's median H1 ATR(14), before any run:
+
+| Year | Price | H1 ATR | Cost of a 1-ATR stop |
+|---|---|---|---|
+| 2016-2019 | ~1,260-1,400 | 2.3-3.4 | 0.044-0.066R |
+| 2020-2024 | ~1,780-2,380 | 4.0-5.8 | 0.026-0.037R |
+| 2025 | ~3,350 | 9.8 | 0.015R |
+| 2026 | ~4,430 | 19.1 | 0.008R |
+
+**What has already seen this data - said before the run, not after.**
+XAUUSD is in `range_fade_v1`'s 16-symbol universe, so its last ~3.2 years
+(signals from 2023-08-23) were inside the 2026-11-14 run. That run's XAUUSD
+line is in `docs/backtest-output/2026-11-14-range_fade_v1-corrected.txt`; it
+was not read for this registration, and this log's only note on it is that
+USDCHF was the run's one significant symbol. Gold was not picked for a
+result: the owner asked for gold, and the reason is the cost table above.
+The demo lab also traded `range_fade_v1` on gold until its retirement
+(2026-09-16, CI entirely below zero over 271 trades, all symbols); those gold
+trades were not looked at either.
+
+**The rules, fixed now.** `evaluate()` is `range_fade_v1`'s own function
+object (asserted in `scripts/test_range_fade_gold.py`, 14/14): fade an H1
+close 1.5 ATR(14) beyond EMA(20) when H4 ADX(14) < 20, stop 1 ATR, target 1.5
+ATR, 07-20 UTC only, the engine's stop management.
+
+**The test.** `scripts/backtest.py range_fade_gold_v1`, run once: 99,999 H1
+bars requested. The terminal serves 69,028 from 1998, daily-only before
+2016-01-03, so the test runs 2016-01 to now. Net of a live spread snapshot,
+$7/lot commission, and financing at today's swap: long -51.52 points
+(-$0.52/oz a night), short +35.00 (+$0.35). Applied to every year, that
+overstates what a long paid in 2016-2019, when the price was a third of
+today's, and over-credits shorts. Across both sides it roughly cancels, so
+the long/short split is not readable here and is not judged.
+
+**Pass criteria** - the same as the last two tests. Over every trade: net
+expectancy with a 95% CI entirely above zero AND positive in both
+chronological halves. The first half falls entirely before 2023-08-23, so
+the years no run has touched must be positive on their own. Anything less is
+a fail, recorded and not adjusted - no other band, stop, session, ADX
+ceiling or start year. A pass in a part ("2024-2026", "shorts only") is NOT
+a pass.
+
+**Prediction.** 800-1,500 trades (`range_fade_v1` fired ~105 a market a year
+on FX and indices). Cost at the median 0.025-0.045R: the 2016-2019 years
+cost what FX costs, the last two cost almost nothing. Financing -0.02R to
+0.00R a trade. Gross +0.02R to +0.05R if the signal is general (it has held
+on two asset classes), about zero if not. Whole test: net between -0.05R and
++0.03R.
+
+**The power, stated in advance.** At ~1,150 trades and ~1.1R of spread
+between trades, the 95% CI is about +/-0.065R wide. A pass needs a net of
+roughly +0.065R or more - beyond anything this signal has shown on any
+market. **The expected result is a fail even if the signal is real on
+gold.** The test is still worth its few minutes: it says whether the signal
+replicates on a third asset class, and whether gold holds anything much
+larger than expected.
+
+**What a pass would and would not mean.** A candidate for the demo lab, on
+XAUUSD only, never for live directly. Two limits stand even then. READY
+needs a CI above zero over 100+ trades. At +0.065R that takes ~1,300 trades,
+and gold alone yields ~105 a year: one market cannot certify an edge this
+size in any useful time. Live cannot size it either: one 0.01 lot with a
+1-ATR stop risks ~$17-19 today, above 5% of the ~$223 live equity, until
+that equity is roughly $350-400.
+
+### Result (2026-11-19, run once, 06:23-06:25 UTC): FAIL - and the signal did not replicate on gold
+
+Output: `docs/backtest-output/2026-11-19-range_fade_gold_v1.txt`.
+
+| | Trades | Gross | Gross CI | Net | Net CI |
+|---|---|---|---|---|---|
+| **XAUUSD, 2016-01 to 2026-11** | **1,184** | **+0.010R** | **[-0.055, +0.076]** | **-0.022R** | **[-0.088, +0.043]** |
+| first half (no run had touched it) | 592 | -0.031R | [-0.121, +0.063] | -0.070R | [-0.160, +0.022] |
+| second half | 592 | +0.052R | [-0.042, +0.144] | +0.025R | [-0.069, +0.118] |
+
+The net CI includes zero and the first half is negative: **fail** on both
+criteria. Not adjusted, not re-run.
+
+Against the prediction: 1,184 trades (800-1,500), cost 0.030R at the median
+(0.025-0.045), financing 0.000R (-0.02 to 0.00), net -0.022R (-0.05 to
++0.03), CI +/-0.065R wide (as stated). The gross, +0.010R, fell in the
+"about zero" branch, not the "general effect" one (+0.02 to +0.05).
+
+**What it adds.** The cheaper toll was real - 0.030R at the median, under
+half of FX's - and the signal was not there to collect it. In the years no
+run had touched, the gross is -0.031R. The second half's +0.052R gross is a
+part, includes the ~3 years already seen, and its CI spans zero. Reading it
+as "gold works since 2021" is the search this log forbids. So the one real
+signal holds on FX and indices and not, on this evidence, on gold.
+
+**What this means for gold.** No gold strategy goes to the demo lab. Gold's
+low cost in 2025-2026 stays true. But any test confined to those years is a
+part, and a forward demo test of a ~+0.05R signal would need ~1,300 trades -
+twelve years of gold alone - to reach a verdict. `range_fade_gold_v1` stays
+registered for `scripts/backtest.py` and is not in `config/plugins.yaml`.
 
 ## 2026-11-17 - Pre-registered: `range_fade_index_v1`, the one real signal on cheaper markets
 
@@ -1183,6 +1314,42 @@ price patterns, tested like `trend_daily_v1`. Four were weighed; none was built.
 but (1) how few independent observations ten years of one broker's history
 holds for anything slower than hourly, and (2) what the broker charges to hold
 a position overnight. An idea has to clear both before it is worth code.
+
+## Candidates rejected before any code (2026-11-19): more trades a week
+
+The owner asked for more trades a week - from `london_breakout_v1`, a new
+strategy, or anything else. First, where live trades are lost. Since
+2026-09-05 live `london_breakout_v1` fired 42 times in 11 weeks and 38 became
+trades. The risk engine refused 4: two at the concurrency cap, two at the
+circuit breaker. The count is set by the strategy's own filter, not by the
+rails. The two ways to get more out of it are both tested and retired: a
+looser compression filter (`london_breakout_wide_v1`) and more pairs
+(`london_breakout_crosses_v1`).
+
+Three mechanisms that would trade more often were checked; none was built.
+
+- **Opening-range breakout at an index's cash open** (Zarattini, Barbon &
+  Aziz, 2023-24: US stocks, 5-minute ranges). A 2026 replication on five
+  index CFDs, 2015-2026, reproduces the gross result and finds the net
+  indistinguishable from zero, four of five negative. That is a blog, not
+  peer-reviewed, and nothing found argues the other way. And this engine's
+  hourly bars cannot draw a 5-minute range; the US cash open falls mid-bar.
+- **Bitcoin's hour of day** (buy 21:00, sell 23:00 UTC; Quantpedia). Reported
+  gross, costs "not reported". Baur, Cahill, Godfrey & Liu (*Finance Research
+  Letters* 31, 2019), on seven exchanges, find time-of-day anomalies that
+  are not persistent; trading volume has stable patterns, returns do not. It
+  also needs an exit at a set hour, which the engine does not have.
+- **Currencies weakening in their own trading hours** (Breedon & Ranaldo,
+  *JMCB* 2013). The same family as the dollar's pattern around the fixes,
+  rejected on 2026-11-17 for cost: a few basis points a day against ~1 bp a
+  round trip. It too needs a timed exit.
+
+**What this adds:** more trades means faster bars or more markets. Faster
+bars shrink the stop, and cost-in-R is a hyperbola in the stop, so the toll
+grows exactly where the trades are added. More markets only multiply an edge,
+and the one gross edge found here (+0.045R) has now lost net on FX, stock
+indices and gold. Until something has a positive net edge, trade frequency is
+not a lever on profit; it sets how fast a negative one is paid.
 
 ## What has NOT been tested
 
