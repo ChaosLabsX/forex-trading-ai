@@ -58,14 +58,10 @@ type Props = {
 
 /** Realized P&L for one account over a period the user picks.
  *
- * The headline follows the house convention already used for every Telegram
- * trade alert (engine/reporting.py): a winning period is reported BEFORE fees,
- * a losing one ALL-IN. Whether it won or lost is decided by the net, so costs
- * can turn a nominal gain into a loss and the panel will say so.
- *
- * Both figures are always on screen underneath. A headline showing gross while
- * hiding net would be a money figure that flatters - the split row exists so
- * the number that actually moved the balance is never more than a glance away. */
+ * The headline is the NET, after fees, win or lose - the money that actually
+ * moved the balance (see `headline`). Gross and fees sit in the split row
+ * underneath, so what the market paid and what the broker took are each a
+ * glance away. */
 export function PnlReport({ account, trades, loading, openCount }: Props) {
   const now = useMemo(() => new Date(), []);
   const [period, setPeriod] = useState<Period>({
@@ -81,7 +77,7 @@ export function PnlReport({ account, trades, loading, openCount }: Props) {
     [trades, period]
   );
   const summary = useMemo(() => summarize(inRange), [inRange]);
-  const { value, basis } = headline(summary);
+  const { value, feesKnown } = headline(summary);
 
   const stepping = period.mode === "month" || period.mode === "year";
   // Stop the arrows at the edges of real history rather than let them walk into
@@ -192,11 +188,13 @@ export function PnlReport({ account, trades, loading, openCount }: Props) {
         <>
           <div className={`pnl-figure ${tone}`}>{fmtMoney(value)}</div>
           <div className="pnl-basis">
-            {basis === "gross"
-              ? "profit before fees"
-              : summary.fees !== null
-                ? "loss including fees"
-                : "net result"}
+            {!feesKnown
+              ? "net result"
+              : value > 0
+                ? "profit after fees"
+                : value < 0
+                  ? "loss after fees"
+                  : "break-even after fees"}
           </div>
 
           <div className="pnl-split">

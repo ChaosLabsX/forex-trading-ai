@@ -405,9 +405,8 @@ body {
   margin-top: 2px;
 }
 
-/* Gross / fees / net, always all three. The headline reports a win before fees
-   (the house grammar from engine/reporting.py), so the figure that actually
-   moved the balance has to sit right under it - never one without the other. */
+/* Gross / fees / net, always all three. The headline is the net after fees;
+   this row shows what the market paid and what the broker took to get there. */
 .pnl-split,
 .pnl-stats {
   display: grid;

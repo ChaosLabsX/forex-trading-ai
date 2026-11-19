@@ -116,25 +116,29 @@ def trade_untracked(position, strategy: str, account: str) -> str:
 
 def trade_closed(symbol: str, direction, breakdown, strategy: str, account: str,
                  exit_note: str | None = None) -> str:
-    """A win reports gross profit before fees; a loss reports the all-in figure.
-    Win/loss is decided by the NET result, so a small gain eaten by commission
-    correctly reads as a loss. `exit_note` says how it ended (trade_autopsy.
-    describe): "full stop, best was +0.6R" turns a bare loss into something you
-    can learn from at a glance."""
+    """Win or loss, the headline is the NET result - what reached the account,
+    after fees. Until 2026-11-19 a win showed its gross, "before fees"; the
+    owner asked for the real figure, and on this account commission is ~8% of
+    each trade's risk, so the gross flattered every win. A win's detail line
+    still names the fees, so the gross is one addition away. Win/loss is
+    decided by the net, so a small gain eaten by commission reads as a loss.
+    `exit_note` says how it ended (trade_autopsy.describe): "full stop, best
+    was +0.6R" turns a bare loss into something you can learn from at a
+    glance."""
     subject = f"{symbol} {direction}" if direction else symbol
     if breakdown is None:
         return _line(
             "⚪", f"CLOSED  ·  {subject}", f"{strategy}  ·  {account}", "result unavailable"
         )
     if breakdown.net >= 0:
-        detail = "before fees"
+        detail = "after fees"
         if abs(breakdown.fees) >= 0.005:
             detail += f"  ·  fees {money(breakdown.fees)}"
         if exit_note:
             detail += f"  ·  {exit_note}"
         return _line(
             "✅",
-            f"WIN  ·  {subject}  ·  {money(breakdown.gross_profit)}",
+            f"WIN  ·  {subject}  ·  {money(breakdown.net)}",
             f"{strategy}  ·  {account}",
             detail,
         )

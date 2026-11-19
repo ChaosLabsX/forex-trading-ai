@@ -117,10 +117,13 @@ Two things stay visible in the collapsed view on purpose:
 ## How the P&L panel reports money
 
 `PnlReport.tsx` follows the **same convention as every Telegram trade alert**
-(`trade_closed()` in `engine/reporting.py`): a winning period is reported
-**before fees**, a losing one **all-in**. Whether it won or lost is decided by
-the **net**, never the gross - so a period whose gross is positive but whose
-commission ate it reads as a loss, which is the case the convention exists for.
+(`trade_closed()` in `engine/reporting.py`): the headline is the **net, after
+fees**, win or lose - the money that actually reached the account. Until
+2026-11-19 a winning period showed its gross "before fees", which on this
+account read as nearly twice the real profit (October 2026: +$5.96 gross, +$2.83
+net); the owner asked for the real figure. Whether it won or lost is decided by
+the net, so a period whose gross is positive but whose commission ate it reads
+as a loss.
 
 Three properties that are deliberate:
 
@@ -131,8 +134,9 @@ Three properties that are deliberate:
 - **A missing fee split is never filled in.** Trades closed before migration
   `0015` carry no `gross_profit`, and PostgREST omits the column entirely until
   that migration is applied - so the field arrives `undefined`, not `null`.
-  `summarize()` tests `?? null` for exactly this, falls back to the net
-  headline, and says how many trades are unaccounted for. A partial gross sum
+  `summarize()` tests `?? null` for exactly this, labels the headline plain
+  "net result" rather than "after fees", and says how many trades are
+  unaccounted for. A partial gross sum
   would silently understate.
 - **A closed trade with no `realized_pnl` is not a zero.** MT5 sometimes never
   returns a result; those are excluded from the sums and counted out loud,

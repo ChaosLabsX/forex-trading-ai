@@ -145,16 +145,17 @@ export function summarize(trades: Trade[]): PnlSummary {
   };
 }
 
-/** The number to put in lights, under the house convention (same rule as the
- * Telegram grammar in engine/reporting.py): a win is reported BEFORE fees, a
- * loss is reported ALL-IN. Which of the two it is, is decided by the net -
- * never by the gross - so costs can turn a nominal gain into a loss.
+/** The number to put in lights: the NET, after fees - what actually reached
+ * the account, win or lose. Until 2026-11-19 a winning period showed its
+ * gross (the Telegram "before fees" grammar), which read as nearly twice the
+ * real profit on this account - October 2026 showed +$5.96, net +$2.83. The
+ * owner asked for the real figure. Gross and fees stay in the split beneath.
  *
- * Falls back to net whenever the fee split is unavailable, because showing a
- * net figure under a "before fees" label would be simply wrong. */
-export function headline(s: PnlSummary): { value: number; basis: "gross" | "net" } {
-  if (s.net >= 0 && s.gross !== null) return { value: s.gross, basis: "gross" };
-  return { value: s.net, basis: "net" };
+ * `feesKnown` says whether the label can honestly say "after fees": when any
+ * trade predates the fee split (migration 0015), net is still the account's
+ * true change, but the panel cannot show what the fees were. */
+export function headline(s: PnlSummary): { value: number; feesKnown: boolean } {
+  return { value: s.net, feesKnown: s.fees !== null };
 }
 
 /** Every CLOSED trade for one account. Separate from useDashboardData, which

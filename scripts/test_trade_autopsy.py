@@ -156,7 +156,10 @@ def main() -> int:
                         "incl. fees  ·  full stop, best was +0.6R"))
     passed.append(check("win alert carries the note",
                         trade_closed("USDCAD", "LONG", pnl_win, "london_breakout_v1", "LIVE", exit_note="hit target").splitlines()[-1],
-                        "before fees  ·  fees -$0.36  ·  hit target"))
+                        "after fees  ·  fees -$0.36  ·  hit target"))
+    passed.append(check("win headline is the net after fees, not the gross",
+                        trade_closed("USDCAD", "LONG", pnl_win, "london_breakout_v1", "LIVE").splitlines()[0],
+                        "✅ WIN  ·  USDCAD LONG  ·  +$3.97"))
     passed.append(check("no note: the alert is exactly as before",
                         trade_closed("EURGBP", "SHORT", pnl_loss, "london_breakout_v1", "LIVE").splitlines()[-1], "incl. fees"))
 

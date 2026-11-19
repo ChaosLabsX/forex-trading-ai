@@ -112,6 +112,6 @@ class BrokerAdapter(ABC):
     @abstractmethod
     def get_closed_position_breakdown(self, position_id: str) -> ClosedTradePnl | None:
         """Realized result split into gross profit / commission / swap, or None
-        if no record is found. Lets a win be reported before fees and a loss
-        all-in."""
+        if no record is found. Lets an alert name the fees beside the net
+        result."""
         ...

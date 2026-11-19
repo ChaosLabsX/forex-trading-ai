@@ -123,8 +123,8 @@ class AIVerdict:
 
 @dataclass(frozen=True)
 class ClosedTradePnl:
-    """Realized result of a closed position, split so a win can be shown before
-    fees and a loss shown all-in. Commission/swap are the broker's own signed
+    """Realized result of a closed position, split so an alert can show the net
+    and name the fees beside it. Commission/swap are the broker's own signed
     values (commission is normally negative; swap can be either)."""
 
     gross_profit: float  # market P&L only, before any costs
