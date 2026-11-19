@@ -17,7 +17,7 @@ page plus [`safety-rails.md`](safety-rails.md) is all you need.
 | Account | `icmarkets-live`, IC Markets, MT5 **#8050468** |
 | Funded | **$200** |
 | Trading | `london_breakout_v1` **only** - every other strategy is `enabled=false` on live |
-| Risk | `strategy_accounts.risk_pct = 0.75` (~$1.50 a trade) |
+| Risk | `strategy_accounts.risk_pct = 5` (~$11 a trade at ~$223 equity; 0.75 until 2026-11-19) |
 | Guard 4 | satisfied by `live_override=true`, **not** by a READY verdict |
 
 **Nothing has ever been READY.** `london_breakout_v1` is `almost_ready`: +0.126R
@@ -88,7 +88,7 @@ lots         = floor(budget / loss_per_lot / volume_step) × volume_step
   `max_margin_use_pct` (25%) of free margin.
 
 Only one number varies per strategy: `strategy_accounts.risk_pct`. `NULL` means
-`default_risk_pct` (0.5%). It is clamped to `max_risk_pct` (2%), so a bad row can
+`default_risk_pct` (0.5%). It is clamped to `max_risk_pct` (5%, raised from 2% on 2026-11-19), so a bad row can
 never become an outsized bet.
 
 ## Adding another strategy to live

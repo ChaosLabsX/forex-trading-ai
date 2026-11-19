@@ -67,9 +67,11 @@ class Settings(BaseSettings):
     # --- Live position sizing (engine/sizing.py) ---------------------------
     # Fallback risk per trade when a strategy/account pair has no risk_pct of
     # its own (strategy_accounts.risk_pct). max_risk_pct is a hard ceiling that
-    # a per-strategy value can never exceed - a fat-fingered 50 stays 2.
+    # a per-strategy value can never exceed - a fat-fingered 50 stays 5.
+    # Raised 2 -> 5 on 2026-11-19 at the owner's request, so live
+    # london_breakout_v1 can risk 5% a trade.
     default_risk_pct: float = 0.5
-    max_risk_pct: float = 2.0
+    max_risk_pct: float = 5.0
     # Refuse a trade whose margin would eat more than this share of free margin.
     max_margin_use_pct: float = 25.0
 
