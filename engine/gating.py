@@ -84,6 +84,31 @@ class Gate:
     account_block: str | None  # non-None means nothing trades on this account
     # strategy -> per-(strategy, account) risk override; absent = use the default
     risk_pct: dict[str, float | None] = field(default_factory=dict)
+    # strategy -> {symbol: risk %}: per-pair overrides of the above
+    # (strategy_accounts.symbol_risk_pct, migration 0018). A pair not listed
+    # uses the strategy's risk_pct.
+    symbol_risk_pct: dict[str, dict[str, float]] = field(default_factory=dict)
+
+
+def parse_symbol_risk(raw: object, strategy_name: str) -> dict[str, float]:
+    """strategy_accounts.symbol_risk_pct -> {SYMBOL: pct}, keeping only usable
+    entries. A bad entry is dropped with a warning, so that pair falls back to
+    the strategy's own risk_pct - never to a guess. The ceiling is not applied
+    here: DefaultRiskEngine clamps every value to Settings.max_risk_pct, one
+    place for one rule."""
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        logger.warning("%s: symbol_risk_pct is not an object (%r) - ignored", strategy_name, raw)
+        return {}
+    parsed: dict[str, float] = {}
+    for symbol, value in raw.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            logger.warning("%s: symbol_risk_pct[%r] = %r is not a positive number - ignored",
+                           strategy_name, symbol, value)
+            continue
+        parsed[str(symbol).upper()] = float(value)
+    return parsed
 
 
 class StrategyGate:
@@ -200,22 +225,32 @@ class StrategyGate:
         eligible: set[str] = set()
         blocked: dict[str, str] = {}
         risk_pct: dict[str, float | None] = {}
+        symbol_risk: dict[str, dict[str, float]] = {}
         for name in known:
             strategy = strategies.get(name)
             pair = pairs.get(name)
             if pair is not None:
                 risk_pct[name] = pair.get("risk_pct")
+                # .get: absent until migration 0018 is applied - every pair
+                # then simply uses risk_pct, exactly as before.
+                symbol_risk[name] = parse_symbol_risk(pair.get("symbol_risk_pct"), name)
             reason = strategy_block_reason(strategy, pair, account.is_live, self._account_key)
             if reason is None:
                 eligible.add(name)
             else:
                 blocked[name] = reason
-        return Gate(frozenset(eligible), blocked, None, risk_pct)
+        return Gate(frozenset(eligible), blocked, None, risk_pct, symbol_risk)
 
-    def risk_pct_for(self, strategy_name: str) -> float | None:
-        """Per-(strategy, account) risk override, or None to use the default."""
+    def risk_pct_for(self, strategy_name: str, symbol: str | None = None) -> float | None:
+        """Risk % for this strategy on this account - the pair's own value if
+        symbol_risk_pct lists it, else the strategy's risk_pct, else None (the
+        engine default)."""
         if self._cache is None:
             return None
+        if symbol is not None:
+            per_pair = self._cache.symbol_risk_pct.get(strategy_name, {}).get(symbol.upper())
+            if per_pair is not None:
+                return per_pair
         return self._cache.risk_pct.get(strategy_name)
 
     @staticmethod

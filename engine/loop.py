@@ -950,7 +950,7 @@ class EngineLoop:
                 account_state,
                 open_positions,
                 broker,
-                risk_pct=self._gate.risk_pct_for(strategy_name),
+                risk_pct=self._gate.risk_pct_for(strategy_name, signal.symbol),
             )
         except Exception:
             logger.exception("risk engine failed validating %s %s", strategy_name, signal.symbol)

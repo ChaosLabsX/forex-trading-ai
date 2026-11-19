@@ -157,7 +157,7 @@ def build(cap: int, strategies, test_mode=False, refuse=None):
     loop._account_key = settings.account_key
     loop._gate = types.SimpleNamespace(
         gate=lambda known, force=False: Gate(frozenset(names), {}, None),
-        risk_pct_for=lambda name: 0.75,
+        risk_pct_for=lambda name, symbol=None: 0.75,
         account=lambda: AccountInfo("icmarkets-live", "Live", "live", True))
     loop._instruments = tuple(dict.fromkeys(sym for s in strategies for sym in s.instruments))
     loop._unavailable_instruments = set()

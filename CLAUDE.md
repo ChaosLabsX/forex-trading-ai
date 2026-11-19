@@ -40,9 +40,11 @@ refusal is the product.
   and all four guards are deliberately open for **`london_breakout_v1` only**:
   `LIVE_TRADING_ENABLED=true` in `.env.live`, `accounts.enabled=true`,
   `strategy_accounts.enabled=true`, and `live_override=true` standing in for the
-  READY verdict it does not have. Risk is `risk_pct=5` (~$11 a trade at ~$223; raised from 0.75 on
-  2026-11-19 at the owner's request, with `max_risk_pct` lifted 2 -> 5 to allow it, and `max_margin_use_pct` 25 -> 75 so
-  tight-stop pairs are not refused at that size). Every
+  READY verdict it does not have. Risk is per pair since 2026-11-19, at the owner's
+  request (`strategy_accounts.symbol_risk_pct`, migration 0018): USDCAD 7%; NZDUSD,
+  USDCHF, USDJPY 6%; GBPJPY, EURJPY, CHFJPY 5%; all other pairs `risk_pct=2`
+  (0.75 before that day). `max_risk_pct` is 7 and `max_margin_use_pct` 100, so
+  no trade is refused for margin unless the broker itself would refuse it. Every
   other strategy is `enabled=false` on live. See
   [`docs/going-live.md`](docs/going-live.md).
 - **That is a deliberate bet on a strategy that has not proven an edge**, taken

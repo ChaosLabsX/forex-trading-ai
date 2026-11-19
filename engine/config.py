@@ -67,18 +67,21 @@ class Settings(BaseSettings):
     # --- Live position sizing (engine/sizing.py) ---------------------------
     # Fallback risk per trade when a strategy/account pair has no risk_pct of
     # its own (strategy_accounts.risk_pct). max_risk_pct is a hard ceiling that
-    # a per-strategy value can never exceed - a fat-fingered 50 stays 5.
-    # Raised 2 -> 5 on 2026-11-19 at the owner's request, so live
-    # london_breakout_v1 can risk 5% a trade.
+    # a per-strategy or per-pair value can never exceed - a fat-fingered 50
+    # stays 7. Raised 2 -> 5 -> 7 on 2026-11-19 at the owner's request, for
+    # live london_breakout_v1's per-pair risk (USDCAD 7%; see going-live.md).
     default_risk_pct: float = 0.5
-    max_risk_pct: float = 5.0
+    max_risk_pct: float = 7.0
     # Refuse a trade whose margin would eat more than this share of free margin.
-    # Raised 25 -> 75 on 2026-11-19 at the owner's request: at 5% risk on ~$226
-    # a tight-stop pair needs big lots, and 25% refused 61% of the 145 past
-    # london_breakout_v1 signals (EURGBP worst, up to 63%). 75 admits all of
-    # them as a first trade. Sizing still bounds the loss AT THE STOP; this
-    # bounds how much of the account one position can tie up.
-    max_margin_use_pct: float = 75.0
+    # Raised 25 -> 75 -> 100 on 2026-11-19 at the owner's request, who asked
+    # that no trade be skipped for margin. At 25%, 5% risk refused 61% of the
+    # 145 past london_breakout_v1 signals. At the per-pair risks (7/6/5/2%)
+    # one trade needs up to 62% (USDCAD), but two open at once need up to 96%
+    # of what the first leaves free (USDJPY, then USDCAD). 100 means this check
+    # refuses only what the broker would refuse anyway. Sizing still bounds
+    # the loss AT THE STOP; nothing now bounds how much of the account the
+    # positions tie up, which matters only if price gaps through a stop.
+    max_margin_use_pct: float = 100.0
 
     # Cap on simultaneously open positions PER STRATEGY (not per account).
     #

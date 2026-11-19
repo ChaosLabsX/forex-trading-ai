@@ -17,7 +17,7 @@ page plus [`safety-rails.md`](safety-rails.md) is all you need.
 | Account | `icmarkets-live`, IC Markets, MT5 **#8050468** |
 | Funded | **$200** |
 | Trading | `london_breakout_v1` **only** - every other strategy is `enabled=false` on live |
-| Risk | `strategy_accounts.risk_pct = 5` (~$11 a trade at ~$223 equity; 0.75 until 2026-11-19) |
+| Risk | per pair since 2026-11-19 (`symbol_risk_pct`): USDCAD 7%; NZDUSD, USDCHF, USDJPY 6%; GBPJPY, EURJPY, CHFJPY 5%; every other pair `risk_pct = 2`. Chosen by the owner from each pair's live result (1-5 trades each) |
 | Guard 4 | satisfied by `live_override=true`, **not** by a READY verdict |
 
 **Nothing has ever been READY.** `london_breakout_v1` is `almost_ready`: +0.126R
@@ -85,12 +85,20 @@ lots         = floor(budget / loss_per_lot / volume_step) × volume_step
   change.
 - **Margin-checked** afterwards: sizing bounds the *loss*, not the capital
   committed, so a correctly-sized trade can still be unaffordable. Refused above
-  `max_margin_use_pct` of free margin: 75%, raised from 25% on 2026-11-19
-  because 5% risk on a tight-stop pair (EURGBP) needs up to ~63%.
+  `max_margin_use_pct` of free margin: **100%** since 2026-11-19 (was 25%, then
+  75%), at the owner's request that no trade be skipped for margin. At the
+  per-pair risks one trade needs up to ~62% (USDCAD at 7%), and two open at
+  once up to ~96% of what the first leaves. So this check now refuses only
+  what the broker would refuse anyway, and nothing bounds the notional the
+  positions carry - which costs more than the stop only if price gaps
+  through it.
 
-Only one number varies per strategy: `strategy_accounts.risk_pct`. `NULL` means
-`default_risk_pct` (0.5%). It is clamped to `max_risk_pct` (5%, raised from 2% on 2026-11-19), so a bad row can
-never become an outsized bet.
+Risk varies per strategy and, optionally, per pair. `strategy_accounts.risk_pct`
+is the strategy's risk on that account (`NULL` means `default_risk_pct`, 0.5%);
+`strategy_accounts.symbol_risk_pct` (migration 0018) overrides it for the
+pairs it lists, e.g. `{"USDCAD": 7}` (`engine/gating.py`; tested by
+`scripts/test_symbol_risk.py`). Every value is clamped to `max_risk_pct` (7%,
+raised from 2% on 2026-11-19), so a bad row can never become an outsized bet.
 
 ## Adding another strategy to live
 
