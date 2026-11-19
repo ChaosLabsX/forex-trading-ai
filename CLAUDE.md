@@ -41,7 +41,8 @@ refusal is the product.
   `LIVE_TRADING_ENABLED=true` in `.env.live`, `accounts.enabled=true`,
   `strategy_accounts.enabled=true`, and `live_override=true` standing in for the
   READY verdict it does not have. Risk is `risk_pct=5` (~$11 a trade at ~$223; raised from 0.75 on
-  2026-11-19 at the owner's request, with `max_risk_pct` lifted 2 -> 5 to allow it). Every
+  2026-11-19 at the owner's request, with `max_risk_pct` lifted 2 -> 5 to allow it, and `max_margin_use_pct` 25 -> 75 so
+  tight-stop pairs are not refused at that size). Every
   other strategy is `enabled=false` on live. See
   [`docs/going-live.md`](docs/going-live.md).
 - **That is a deliberate bet on a strategy that has not proven an edge**, taken

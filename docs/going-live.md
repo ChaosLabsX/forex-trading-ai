@@ -85,7 +85,8 @@ lots         = floor(budget / loss_per_lot / volume_step) × volume_step
   change.
 - **Margin-checked** afterwards: sizing bounds the *loss*, not the capital
   committed, so a correctly-sized trade can still be unaffordable. Refused above
-  `max_margin_use_pct` (25%) of free margin.
+  `max_margin_use_pct` of free margin: 75%, raised from 25% on 2026-11-19
+  because 5% risk on a tight-stop pair (EURGBP) needs up to ~63%.
 
 Only one number varies per strategy: `strategy_accounts.risk_pct`. `NULL` means
 `default_risk_pct` (0.5%). It is clamped to `max_risk_pct` (5%, raised from 2% on 2026-11-19), so a bad row can

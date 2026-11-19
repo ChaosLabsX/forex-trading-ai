@@ -73,7 +73,12 @@ class Settings(BaseSettings):
     default_risk_pct: float = 0.5
     max_risk_pct: float = 5.0
     # Refuse a trade whose margin would eat more than this share of free margin.
-    max_margin_use_pct: float = 25.0
+    # Raised 25 -> 75 on 2026-11-19 at the owner's request: at 5% risk on ~$226
+    # a tight-stop pair needs big lots, and 25% refused 61% of the 145 past
+    # london_breakout_v1 signals (EURGBP worst, up to 63%). 75 admits all of
+    # them as a first trade. Sizing still bounds the loss AT THE STOP; this
+    # bounds how much of the account one position can tie up.
+    max_margin_use_pct: float = 75.0
 
     # Cap on simultaneously open positions PER STRATEGY (not per account).
     #
