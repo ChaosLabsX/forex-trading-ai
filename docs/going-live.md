@@ -17,7 +17,7 @@ page plus [`safety-rails.md`](safety-rails.md) is all you need.
 | Account | `icmarkets-live`, IC Markets, MT5 **#8050468** |
 | Funded | **$200** |
 | Trading | `london_breakout_v1` **only** - every other strategy is `enabled=false` on live |
-| Risk | per pair since 2026-11-19 (`symbol_risk_pct`): USDCAD 7%; NZDUSD, USDCHF, USDJPY 6%; GBPJPY, EURJPY, CHFJPY 5%; every other pair `risk_pct = 2`. Chosen by the owner from each pair's live result (1-5 trades each) |
+| Risk | per pair since 2026-11-19 (`symbol_risk_pct`): USDCAD 7%; NZDUSD, USDCHF, USDJPY 6%; GBPJPY, EURJPY, CHFJPY 5%; every other pair `risk_pct = 0.75`, as before. Chosen by the owner from each pair's live result (1-5 trades each) |
 | Guard 4 | satisfied by `live_override=true`, **not** by a READY verdict |
 
 **Nothing has ever been READY.** `london_breakout_v1` is `almost_ready`: +0.126R

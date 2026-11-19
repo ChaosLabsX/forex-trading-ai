@@ -75,7 +75,7 @@ class Settings(BaseSettings):
     # Refuse a trade whose margin would eat more than this share of free margin.
     # Raised 25 -> 75 -> 100 on 2026-11-19 at the owner's request, who asked
     # that no trade be skipped for margin. At 25%, 5% risk refused 61% of the
-    # 145 past london_breakout_v1 signals. At the per-pair risks (7/6/5/2%)
+    # 145 past london_breakout_v1 signals. At the per-pair risks (7/6/5/0.75%)
     # one trade needs up to 62% (USDCAD), but two open at once need up to 96%
     # of what the first leaves free (USDJPY, then USDCAD). 100 means this check
     # refuses only what the broker would refuse anyway. Sizing still bounds
