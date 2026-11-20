@@ -3,9 +3,9 @@ from __future__ import annotations
 import logging
 import random
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timezone
 
-from engine import review_scoring, trade_autopsy
+from engine import market_hours, review_scoring, trade_autopsy
 from engine.config import Settings
 from engine.core.interfaces.market_data import MarketDataUnavailable, SymbolUnavailableError
 from engine.core.interfaces.strategy import StrategyContext
@@ -21,11 +21,11 @@ from engine.evaluator import ReadinessEvaluator
 from engine.gating import StrategyGate
 from engine.registry import EngineComposition
 from engine.reporting import (
-    build_daily_summary,
     engine_event,
     execution_failed,
     format_readiness_change,
-    parse_daily_time,
+    market_closed,
+    market_opened,
     stop_protected,
     trade_closed,
     trade_opened,
@@ -67,9 +67,6 @@ CANDLE_PASS_SECOND = 3
 # a modify only matters when price has meaningfully advanced).
 MANAGE_INTERVAL_SECONDS = 5
 RECONNECT_BACKOFF_SECONDS = (5, 10, 30, 60)
-# The daily digest only fires inside this window after its scheduled time, so a
-# restart later in the day can't resend it.
-DAILY_SUMMARY_WINDOW_MINUTES = 30
 
 
 def command_poll_interval(is_lab: bool, flat: bool) -> int:
@@ -163,7 +160,10 @@ class EngineLoop:
         # recomputing it per review would add two Supabase round-trips to every
         # signal to get the same answer.
         self._review_record = review_scoring.EMPTY_RECORD
-        self._last_summary_date: date | None = None
+        # Last market state seen (open?), so an alert fires on the CHANGE only.
+        # None until the first look: a restart over a weekend must not
+        # announce a close that happened before it.
+        self._market_was_open: bool | None = None
         # (strategy_name, symbol) -> timestamp of the last *closed* entry-timeframe
         # bar we evaluated, so we log each closed bar's outcome exactly once
         self._last_evaluated_bar: dict[tuple[str, str], datetime] = {}
@@ -279,12 +279,12 @@ class EngineLoop:
             self._last_manage = now
         # After the orders AND a first look at the new positions' stops.
         self._run_pending_reviews()
-        # Evaluation and the digest read only Supabase, so they keep working
+        # Evaluation and the market alerts read only Supabase, so they keep working
         # (and keep reporting) even while the broker is down.
         if now - self._last_evaluation >= self._settings.evaluation_interval_minutes * 60:
             self._run_evaluation()
             self._last_evaluation = now
-        self._maybe_send_daily_summary()
+        self._maybe_send_market_alert()
 
     # ---------------------------------------------------- strategy lifecycle
 
@@ -324,31 +324,44 @@ class EngineLoop:
         )
         self._gate.gate([s.name for s in self._engine.strategies], force=True)
 
-    def _maybe_send_daily_summary(self) -> None:
-        if not self._settings.daily_summary_enabled:
-            return
-        target = parse_daily_time(self._settings.daily_summary_utc_time)
-        if target is None:
+    def _maybe_send_market_alert(self) -> None:
+        """Telegram when the FX week closes and when it opens, from the LIVE
+        engine only - one sender, so no duplicates, and the close carries the
+        live account's week. On the clock (engine/market_hours.py), so it fires
+        whether or not the broker is connected."""
+        account = self._account()
+        if account is None or account.account_type != "live":
             return
         now = datetime.now(timezone.utc)
-        if self._last_summary_date == now.date():
+        is_open = market_hours.is_open(now)
+        was_open, self._market_was_open = self._market_was_open, is_open
+        if was_open is None or was_open == is_open:
             return
-        scheduled = datetime.combine(now.date(), target)
-        # Only fire inside a short window after the target: a restart hours
-        # later must not resend the digest.
-        if not (scheduled <= now < scheduled + timedelta(minutes=DAILY_SUMMARY_WINDOW_MINUTES)):
-            return
-        self._last_summary_date = now.date()
         try:
-            gate = self._gate.gate([s.name for s in self._engine.strategies])
-            _notify_all(
-                self._engine,
-                "daily_summary",
-                build_daily_summary(self._supabase, gate.account_block, now),
-            )
-            logger.info("daily summary sent")
+            if is_open:
+                message = market_opened(market_hours.jakarta(market_hours.next_close(now)))
+            else:
+                message = market_closed(market_hours.jakarta(market_hours.next_open(now)),
+                                        self._week_trades(now))
+            _notify_all(self._engine, "market_hours", message)
+            logger.info("market %s alert sent", "open" if is_open else "closed")
         except Exception:
-            logger.exception("failed to build/send daily summary")
+            logger.exception("failed to build/send the market %s alert", "open" if is_open else "closed")
+
+    def _week_trades(self, closed_at: datetime) -> list[dict]:
+        """This account's trades closed during the week that just ended."""
+        start = market_hours.week_start(closed_at)
+        return self._supabase.select(
+            "trades",
+            {
+                "account_key": f"eq.{self._account_key}",
+                "status": "eq.CLOSED",
+                "void_reason": "is.null",
+                "closed_at": f"gte.{start.isoformat()}",
+                "select": "symbol,realized_pnl,closed_at",
+                "limit": "1000",
+            },
+        )
 
     def _ensure_connected(self) -> None:
         broker = self._engine.broker

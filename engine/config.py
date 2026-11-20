@@ -106,11 +106,10 @@ class Settings(BaseSettings):
     readiness_max_drawdown_r: float = 15.0  # demote if the demo curve bleeds worse than this
     evaluation_interval_minutes: int = 30
 
-    # --- Daily Telegram summary --------------------------------------------
-    # HH:MM in UTC. Only ONE engine process should have this enabled, or you get
-    # duplicate summaries - the live engine's .env should set it to false.
-    daily_summary_enabled: bool = True
-    daily_summary_utc_time: str = "21:00"
+    # The daily Telegram summary (DAILY_SUMMARY_ENABLED / _UTC_TIME) was removed
+    # on 2026-11-19 at the owner's request; a leftover line in an env file is
+    # ignored (extra="ignore"). Market open/close alerts replaced it - sent by
+    # the live engine only, no setting (engine/loop.py _maybe_send_market_alert).
 
     # Trailing-stop management (DefaultExecutionEngine.manage_open_position).
     # Thresholds are in R = the trade's initial risk (|entry - first stop|), so

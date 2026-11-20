@@ -72,7 +72,7 @@ def polls_in(seconds: int, is_lab: bool, flat: bool) -> int:
     loop._ensure_connected = lambda: None
     loop._is_lab = lambda: is_lab
     loop._process_commands = lambda: polls.append(clock[0])
-    loop._maybe_send_daily_summary = lambda: None
+    loop._maybe_send_market_alert = lambda: None
     real_time = loop_mod.time
     loop_mod.time = types.SimpleNamespace(monotonic=lambda: clock[0])
     try:

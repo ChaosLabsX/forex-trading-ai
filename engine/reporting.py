@@ -1,4 +1,4 @@
-"""Human-facing Telegram copy: strategy lifecycle events and the daily digest.
+"""Human-facing Telegram copy: trade and strategy events, and market hours.
 
 Kept apart from the evaluator/loop so the wording can change without touching
 any decision logic, and so every message can be unit-tested without a broker,
@@ -8,17 +8,14 @@ a database, or a network.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, time as dtime, timedelta, timezone
 
 from engine.evaluator import ALMOST_READY, NOT_READY, READY, Evaluation
-from engine.gating import strategy_block_reason
 from engine.stats import TradeStats
 
 logger = logging.getLogger("engine.reporting")
 
 _RANK = {NOT_READY: 0, ALMOST_READY: 1, READY: 2}
 _LABEL = {NOT_READY: "Not ready", ALMOST_READY: "Almost ready", READY: "READY"}
-STALE_HEARTBEAT_SECONDS = 5 * 60
 
 
 def money(value: float) -> str:
@@ -48,10 +45,6 @@ def price(value: float | None, like: float | None = None) -> str:
     else:
         digits = 2
     return f"{value:.{digits}f}"
-
-
-def _money(value: float) -> str:  # kept for existing callers
-    return money(value)
 
 
 # --- the message grammar ----------------------------------------------------
@@ -230,167 +223,31 @@ def format_readiness_change(strategy: dict, previous: str | None, evaluation: Ev
     return "\n".join(lines)
 
 
-def _utc_day_start(now: datetime) -> datetime:
-    return datetime.combine(now.date(), dtime.min, tzinfo=timezone.utc)
+# --- market hours -------------------------------------------------------------
+#
+# Sent by the live engine when the FX week ends and begins (engine/loop.py,
+# engine/market_hours.py). Times are Jakarta time, 12-hour, no year - the
+# owner's own clock. The close carries the live account's week, pair by pair,
+# best first: the one message that lists more than one detail line, because
+# the owner asked for exactly that breakdown.
 
 
-def parse_daily_time(raw: str) -> dtime | None:
-    try:
-        hour, minute = raw.split(":")
-        return dtime(int(hour), int(minute), tzinfo=timezone.utc)
-    except (ValueError, AttributeError):
-        logger.error("invalid daily_summary_utc_time %r - expected HH:MM", raw)
-        return None
+def market_opened(closes_at: str) -> str:
+    return _line("🔓", f"MARKET OPEN  ·  closes {closes_at}")
 
 
-def build_daily_summary(supabase, account_block: str | None, now: datetime | None = None) -> str:
-    """Whole-system digest, read straight from Supabase so it covers every
-    account regardless of which engine process sends it."""
-    now = now or datetime.now(timezone.utc)
-    day_start = _utc_day_start(now)
-    day_start_iso = day_start.isoformat()
-
-    accounts = supabase.select("accounts", {})
-    strategies = supabase.select("strategies", {})
-    links = supabase.select("strategy_accounts", {})
-
-    lines = [f"📊 DAILY SUMMARY  ·  {now.date().isoformat()} (UTC)", ""]
-    warnings: list[str] = []
-
-    # --- engines -----------------------------------------------------------
-    lines.append("ENGINES")
-    # Guard 1 (LIVE_TRADING_ENABLED) lives in the running engine's env file, not
-    # in any table, so the only honest source is what that engine last reported.
-    guard1: dict[str, bool | None] = {}
-    for account in accounts:
-        beats = supabase.select(
-            "engine_heartbeats",
-            {"account_key": f"eq.{account['key']}", "order": "created_at.desc", "limit": "1"},
-        )
-        if not beats:
-            lines.append(f"  {account['key']}: no heartbeat ever received")
-            if account["enabled"]:
-                warnings.append(f"{account['key']} has never sent a heartbeat")
-            continue
-        beat = beats[0]
-        detail = beat.get("detail") or ""
-        guard1[account["key"]] = (
-            True if "live_trading=on" in detail else False if "live_trading=off" in detail else None
-        )
-        age = (now - datetime.fromisoformat(beat["created_at"].replace("Z", "+00:00"))).total_seconds()
-        state = beat.get("status", "?")
-        if age > STALE_HEARTBEAT_SECONDS:
-            lines.append(f"  {account['key']}: OFFLINE (last beat {int(age // 60)}m ago)")
-            if account["enabled"]:
-                warnings.append(f"{account['key']} engine looks offline")
-        else:
-            lines.append(f"  {account['key']}: {state} ({int(age)}s ago)")
-
-    # --- strategies --------------------------------------------------------
-    by_verdict = {NOT_READY: 0, ALMOST_READY: 0, READY: 0}
-    for strategy in strategies:
-        if strategy.get("retired"):
-            continue
-        by_verdict[strategy.get("readiness", NOT_READY)] = (
-            by_verdict.get(strategy.get("readiness", NOT_READY), 0) + 1
-        )
-    active = len([s for s in strategies if not s.get("retired")])
-    enabled_by_account: dict[str, int] = {}
-    for link in links:
-        if link.get("enabled"):
-            enabled_by_account[link["account_key"]] = enabled_by_account.get(link["account_key"], 0) + 1
-
-    lines += [
-        "",
-        "STRATEGIES",
-        f"  {active} active  ·  Ready {by_verdict.get(READY, 0)}  ·  "
-        f"Almost {by_verdict.get(ALMOST_READY, 0)}  ·  Not ready {by_verdict.get(NOT_READY, 0)}",
-    ]
-    for account in accounts:
-        lines.append(f"  enabled on {account['key']}: {enabled_by_account.get(account['key'], 0)}")
-
-    # --- changes today -----------------------------------------------------
-    changed = [
-        s for s in strategies
-        if s.get("readiness_updated_at") and s["readiness_updated_at"] >= day_start_iso
-    ]
-    lines += ["", "CHANGES TODAY"]
-    if changed:
-        for strategy in changed:
-            lines.append(
-                f"  {strategy.get('display_name') or strategy['name']} → "
-                f"{_LABEL.get(strategy.get('readiness'), strategy.get('readiness'))}"
-            )
-    else:
-        lines.append("  none")
-
-    # --- performance -------------------------------------------------------
-    for account in accounts:
-        closed = supabase.select(
-            "trades",
-            {
-                "status": "eq.CLOSED",
-                "account_key": f"eq.{account['key']}",
-                "closed_at": f"gte.{day_start_iso}",
-            },
-        )
-        net = sum(float(t["realized_pnl"]) for t in closed if t.get("realized_pnl") is not None)
-        opened = supabase.select(
-            "trades",
-            {"account_key": f"eq.{account['key']}", "opened_at": f"gte.{day_start_iso}"},
-        )
-        label = account["account_type"].upper()
-        lines += ["", f"{label}  ·  {account['key']}  (today)"]
-        if not closed and not opened:
-            lines.append("  no trades")
-        else:
-            lines.append(f"  {len(opened)} opened  ·  {len(closed)} closed  ·  net {_money(net)}")
-
-    # --- warnings ----------------------------------------------------------
-    if account_block:
-        warnings.append(account_block)
-    # What each enabled LIVE account can actually do - decided by the engine's
-    # own rule (gating.strategy_block_reason), never re-derived here. This used
-    # to say "no strategy is Ready - live trading would place no trades by
-    # design" whenever nothing was Ready, ignoring live_override: so every
-    # summary told you the live account could not trade while london_breakout_v1
-    # was cleared to place real orders on an override. Wrong in the direction
-    # that matters most - it reassures you real money is idle when it is not.
-    strategies_by_name = {s["name"]: s for s in strategies}
-    for account in accounts:
-        if account.get("account_type") != "live" or not account.get("enabled"):
-            continue
-        key = account["key"]
-        pairs = {link["strategy_name"]: link for link in links if link["account_key"] == key}
-        cleared = sorted(
-            name for name in pairs
-            if strategy_block_reason(strategies_by_name.get(name), pairs[name], True, key) is None
-        )
-        if not cleared:
-            warnings.append(f"{key}: no strategy is cleared for live - it will place no trades")
-        elif guard1.get(key) is False:
-            warnings.append(
-                f"{key}: {len(cleared)} strategy(s) cleared, but LIVE_TRADING_ENABLED is off - "
-                "no real order can be placed"
-            )
-        else:
-            # Cleared on an override rather than a Ready verdict. Said every day on
-            # purpose: it is a deliberate bet on an unproven edge, and a digest
-            # that stopped mentioning it would let that fact fade into background.
-            unproven = [
-                f"{name} ({_LABEL.get(strategies_by_name[name].get('readiness'), '?')})"
-                for name in cleared
-                if strategies_by_name[name].get("readiness") != READY
-            ]
-            if unproven:
-                warnings.append(
-                    f"{key} is trading real money on override, not a Ready verdict: "
-                    + ", ".join(unproven)
-                )
-
-    lines += ["", "WARNINGS"]
-    if warnings:
-        lines += [f"  • {w}" for w in warnings]
-    else:
-        lines.append("  none")
+def market_closed(opens_at: str, week_trades: list[dict]) -> str:
+    """`week_trades`: the live account's trades closed this week, each with
+    `symbol` and `realized_pnl` (net, after fees)."""
+    scored = [t for t in week_trades if t.get("realized_pnl") is not None]
+    head = f"🔒 MARKET CLOSED  ·  opens {opens_at}"
+    if not scored:
+        return f"{head}\nThis week: no trades"
+    by_pair: dict[str, list[float]] = {}
+    for t in scored:
+        by_pair.setdefault(t["symbol"], []).append(float(t["realized_pnl"]))
+    total = sum(sum(v) for v in by_pair.values())
+    lines = [head, f"This week: {len(scored)} trade{'s' if len(scored) != 1 else ''}  ·  net {money(total)}"]
+    for symbol, pnls in sorted(by_pair.items(), key=lambda kv: -sum(kv[1])):
+        lines.append(f"{symbol}  {len(pnls)}  ·  {money(sum(pnls))}")
     return "\n".join(lines)

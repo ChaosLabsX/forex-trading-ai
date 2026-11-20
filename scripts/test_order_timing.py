@@ -63,7 +63,7 @@ def passes_between(start: datetime, seconds: int) -> list[datetime]:
                      _settings=types.SimpleNamespace(evaluation_interval_minutes=30))
     loop._ensure_connected = lambda: None
     loop._is_lab = lambda: False
-    loop._maybe_send_daily_summary = lambda: None
+    loop._maybe_send_market_alert = lambda: None
     loop._refresh_market_data_and_evaluate = lambda: ran.append(clock[0])
 
     class FakeDatetime(datetime):
