@@ -186,6 +186,22 @@ def engine_event(icon: str, headline: str, account: str, detail: str = "") -> st
     return _line(icon, headline, account, detail)
 
 
+def _duration(seconds: float) -> str:
+    minutes = int(seconds // 60)
+    return f"{minutes} min" if minutes < 60 else f"{minutes // 60}h {minutes % 60:02d}m"
+
+
+def broker_down(account: str, seconds: float) -> str:
+    """Only sent for an outage that has lasted (engine/loop.py
+    BROKER_DOWN_ALERT_SECONDS) while the market is open - so it says how long."""
+    return engine_event("⚠️", "BROKER DISCONNECTED", account, f"down {_duration(seconds)}  ·  reconnecting")
+
+
+def broker_back(account: str, seconds: float) -> str:
+    """The all-clear for an outage broker_down announced, and only for one."""
+    return engine_event("🔌", "BROKER RECONNECTED", account, f"after {_duration(seconds)}")
+
+
 def stats_line(s: TradeStats) -> str:
     bits = [f"{s.trades_count} trades"]
     if s.win_rate is not None:

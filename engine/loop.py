@@ -21,6 +21,8 @@ from engine.evaluator import ReadinessEvaluator
 from engine.gating import StrategyGate
 from engine.registry import EngineComposition
 from engine.reporting import (
+    broker_back,
+    broker_down,
     engine_event,
     execution_failed,
     format_readiness_change,
@@ -67,6 +69,14 @@ CANDLE_PASS_SECOND = 3
 # a modify only matters when price has meaningfully advanced).
 MANAGE_INTERVAL_SECONDS = 5
 RECONNECT_BACKOFF_SECONDS = (5, 10, 30, 60)
+# Telegram hears about a broker outage only once it has lasted this long AND
+# the FX market is open (owner's request, 2026-11-22). A week of heartbeats
+# showed nine outages, eight of them at weekends and the ninth a 2-minute blip
+# at the broker's nightly rollover - each one two alerts, none actionable. The
+# engine still logs every drop and still reconnects at once; only the message
+# waits. Long enough to outlast those blips, short enough that a real weekday
+# outage is heard about in minutes.
+BROKER_DOWN_ALERT_SECONDS = 180
 
 
 def command_poll_interval(is_lab: bool, flat: bool) -> int:
@@ -143,6 +153,11 @@ class EngineLoop:
         self._evaluator = ReadinessEvaluator(supabase, self._settings)
         self._connected = False
         self._backoff_index = 0
+        # Broker-outage bookkeeping for the Telegram alerts (_ensure_connected):
+        # when the link went down (monotonic), and whether Telegram was told.
+        self._ever_connected = False
+        self._down_since: float | None = None
+        self._down_alerted = False
         self._last_heartbeat = 0.0
         self._last_command_poll = 0.0
         # True only once a position read has come back empty - see
@@ -267,7 +282,11 @@ class EngineLoop:
         if self._connected and now - self._last_command_poll >= command_poll_interval(self._is_lab(), self._flat):
             self._process_commands()
             self._last_command_poll = now
-        if self._connected and now - self._last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
+        # Connected or not: the heartbeat says the ENGINE is alive, and carries
+        # broker_connected for the broker. Sent only while connected until
+        # 2026-11-22, so a weekend broker outage read to the watchdog as a dead
+        # engine ("ENGINE SILENT") while the process was alive and reconnecting.
+        if now - self._last_heartbeat >= HEARTBEAT_INTERVAL_SECONDS:
             self._send_heartbeat()
             self._last_heartbeat = now
         wall = datetime.now(timezone.utc)
@@ -370,32 +389,56 @@ class EngineLoop:
 
         if broker.is_connected():
             if not self._connected:
-                self._connected = True
-                self._backoff_index = 0
-                logger.info("broker connected")
-                _notify_all(self._engine, "broker_connected", engine_event("🔌", "BROKER CONNECTED", self._account_label()))
+                self._broker_back()
             return
 
         if self._connected:
             self._connected = False
             logger.warning("broker disconnected")
-            _notify_all(
-                self._engine,
-                "broker_disconnected",
-                engine_event("⚠️", "BROKER DISCONNECTED", self._account_label(), "reconnecting"),
-            )
+        if self._down_since is None:
+            self._down_since = time.monotonic()
+        self._maybe_alert_broker_down()
 
         try:
             broker.connect()
-            self._connected = True
-            self._backoff_index = 0
-            logger.info("broker (re)connected")
-            _notify_all(self._engine, "broker_connected", engine_event("🔌", "BROKER RECONNECTED", self._account_label()))
+            self._broker_back()
         except Exception as exc:
             wait = RECONNECT_BACKOFF_SECONDS[min(self._backoff_index, len(RECONNECT_BACKOFF_SECONDS) - 1)]
             logger.error("reconnect failed, retrying in %ss: %s", wait, exc)
             self._backoff_index += 1
             time.sleep(wait)
+
+    def _broker_back(self) -> None:
+        """The link is up. Telegram gets the all-clear only if it was told of
+        the outage: a blip it never heard about needs none, and the first
+        connection after a start is already covered by ENGINE STARTED."""
+        down_for = time.monotonic() - self._down_since if self._down_since is not None else 0.0
+        self._connected = True
+        self._backoff_index = 0
+        if self._down_alerted:
+            logger.info("broker reconnected after %.0fs", down_for)
+            _notify_all(self._engine, "broker_connected", broker_back(self._account_label(), down_for))
+        elif self._ever_connected:
+            logger.info("broker reconnected after %.0fs - not alerted (brief, or market closed)", down_for)
+        else:
+            logger.info("broker connected")
+        self._ever_connected = True
+        self._down_since = None
+        self._down_alerted = False
+
+    def _maybe_alert_broker_down(self) -> None:
+        """Tell Telegram of an outage once it has lasted
+        BROKER_DOWN_ALERT_SECONDS while the market is open - once per outage.
+        One that began at the weekend is announced if it is still going after
+        the open, since that is when it starts to matter."""
+        if self._down_alerted or self._down_since is None:
+            return
+        down_for = time.monotonic() - self._down_since
+        if down_for < BROKER_DOWN_ALERT_SECONDS or not market_hours.is_open(datetime.now(timezone.utc)):
+            return
+        self._down_alerted = True
+        logger.warning("broker down %.0fs with the market open - alerting", down_for)
+        _notify_all(self._engine, "broker_disconnected", broker_down(self._account_label(), down_for))
 
     def _live_trading_detail(self) -> str | None:
         """Guard 1's state, published so the dashboard can stop guessing.
